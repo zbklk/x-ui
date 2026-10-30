@@ -10,26 +10,25 @@
 
 支持运行 systemd 的 **Ubuntu 22.04+ / Debian 12+**，Python 3.10+，amd64 / arm64。暂不支持 Alpine / OpenRC。
 
-在 VPS 上执行：
+以 **root 用户登录 VPS** 后，复制下面这一整行执行：
 
 ```bash
-installer=$(mktemp)
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://raw.githubusercontent.com/zbklk/x-ui/main/install-personal.sh \
-  -o "$installer"
-sudo bash "$installer"
-rm -f "$installer"
+bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/zbklk/x-ui/main/install-personal.sh)
 ```
 
-交互安装时设置管理员账号和密码。无人值守安装不会创建默认账号，之后执行 `sudo panelctl admin` 创建。密码至少 14 字符，输入不显示；重设账号会撤销已有会话。
+如果当前使用普通用户，先执行 `sudo -i` 切换到 root，再运行上面的安装命令。
 
-在自己的电脑运行，替换服务器 IP、SSH 用户及必要的 SSH 端口：
+首次交互安装会提示设置管理员账号和密码。无人值守安装不会创建默认账号，之后在 VPS 执行 `panelctl admin` 创建。密码至少 14 字符，输入不显示；重设账号会撤销已有会话。
+
+安装后，在**自己的电脑**（不是 VPS）打开终端，替换服务器 IP 和 SSH 用户，运行：
 
 ```bash
 ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
 ```
 
-保持 SSH 连接，然后访问 **http://127.0.0.1:54322**。
+SSH 端口不是 22 时，在 `ssh` 后添加 `-p 你的SSH端口`。保持这个终端窗口和 SSH 连接，然后在自己电脑的浏览器访问 **http://127.0.0.1:54322**。
+
+面板默认只监听 VPS 本机地址，不需要向公网开放管理端口 54322。
 
 安装不会停止旧 x-ui，不会修改旧数据库、旧证书、防火墙或 SSH 配置。新旧节点不能占用相同端口。GitHub 保存源码和脚本，面板运行在 VPS，不能部署到 GitHub Pages。
 

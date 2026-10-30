@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart only the dedicated personal Xray service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart personal-xray.service
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes

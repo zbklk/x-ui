@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch validated Personal Panel Xray reload requests
+
+[Path]
+PathChanged=/var/lib/personal-xray/reload.trigger
+Unit=personal-xray-reload.service
+
+[Install]
+WantedBy=multi-user.target

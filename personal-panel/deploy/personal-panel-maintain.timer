@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Personal Panel accounting and expiry about every 15 seconds
+
+[Timer]
+OnBootSec=20
+OnUnitInactiveSec=15
+AccuracySec=1
+Unit=personal-panel-maintain.service
+
+[Install]
+WantedBy=timers.target

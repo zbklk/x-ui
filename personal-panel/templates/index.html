@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Panel · 私人节点管理</title>
+  <link rel="stylesheet" href="/static/panel.css">
+  <script src="/static/panel.js" defer></script>
+</head>
+<body>
+<div id="toast" role="status" hidden></div>
+<main id="login" class="login-wrap">
+  <form id="login-form" class="login-card">
+    <div class="brand-mark">P</div><p class="eyebrow">PERSONAL PANEL</p>
+    <h1>你的节点，自己掌控。</h1><p class="muted">登录私人管理空间</p>
+    <label>用户名<input name="username" autocomplete="username" required maxlength="80"></label>
+    <label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+    <button type="submit" class="primary">登录面板 <span>→</span></button>
+    <p id="login-error" class="error" role="alert"></p>
+    <p class="fine">默认仅通过本机或 SSH 隧道访问。首次账号在服务器运行 <code>panelctl admin</code> 创建。</p>
+  </form>
+</main>
+<div id="workspace" class="workspace" hidden>
+  <aside>
+    <div class="brand"><div class="brand-mark">P</div><div>Personal Panel<small>私人节点管理</small></div></div>
+    <nav aria-label="主导航">
+      <button class="nav active" data-tab="overview">概览与节点 <span>01</span></button>
+      <button class="nav" data-tab="settings">连接设置 <span>02</span></button>
+      <button class="nav" data-tab="maintenance">证书与维护 <span>03</span></button>
+    </nav>
+    <div class="sidebar-foot"><span class="dot"></span> 自用 · 独立维护<small id="version">v0.1.0</small></div>
+  </aside>
+  <main class="content">
+    <header><div><p class="eyebrow">YOUR PRIVATE NETWORK</p><h1 id="page-title">概览与节点</h1></div>
+      <div class="header-actions"><span id="username" class="muted"></span><button id="refresh">刷新</button><button id="logout">退出</button></div>
+    </header>
+    <section id="overview" class="tab">
+      <div class="metrics">
+        <article><p>核心状态</p><strong id="core-status">—</strong><small id="core-version">—</small></article>
+        <article><p>入站 / 用户</p><strong id="node-count">0 / 0</strong><small>到期或超额用户自动停用</small></article>
+        <article><p>累计流量</p><strong id="total-traffic">0 B</strong><small id="stats-time">尚未采集</small></article>
+        <article><p>证书剩余</p><strong id="cert-days">—</strong><small id="cert-name">无需为 REALITY 申请证书</small></article>
+      </div>
+      <div class="section-title"><div><h2>我的入站</h2><p class="muted">一处管理连接、用户和使用额度</p></div><button id="new-node" class="primary">＋ 新建入站</button></div>
+      <div id="nodes" class="node-list"></div>
+      <div id="empty" class="empty"><div class="empty-symbol">↗</div><h2>从第一个连接开始</h2><p>创建入站，添加用户，再把分享链接导入客户端。</p><button id="empty-new" class="primary">新建入站</button></div>
+      <p class="fine">流量与额度约每 15 秒检查；额度不是严格的实时计费边界。IPv6 监听地址“::”在部分系统上也接受 IPv4。</p>
+    </section>
+    <section id="settings" class="tab" hidden>
+      <form id="settings-form" class="card narrow">
+        <h2>连接默认值</h2><p class="muted">只影响本面板生成的 Xray 配置。</p>
+        <label>分享地址<input name="public_address" placeholder="公网 IP 或 panel.example.com" maxlength="253"><small>不填写协议或端口；入站可单独覆盖。</small></label>
+        <label class="check"><input type="checkbox" name="ipv4_only"> 出站仅使用 IPv4</label>
+        <label class="check"><input type="checkbox" name="block_private"> 阻止代理访问服务器内网及本机地址</label>
+        <label>核心日志等级<select name="loglevel"><option value="warning">Warning（推荐）</option><option value="error">Error</option><option value="info">Info（排查时使用）</option></select></label>
+        <button type="submit" class="primary">校验并保存</button>
+      </form>
+    </section>
+    <section id="maintenance" class="tab" hidden>
+      <div class="maintenance-grid">
+        <article class="card"><p class="eyebrow">CERTIFICATE</p><h2>自动续签，凭据独立</h2><p id="cert-detail" class="muted">尚未配置证书。</p>
+          <p>在服务器运行以下命令，按提示输入指定 Zone 的 API Token。凭据不会经过网页。</p><pre>sudo panelctl cert panel.example.com</pre>
+          <p class="fine">用于节点 TLS。面板也使用 HTTPS 时，在命令末尾加 <code>--panel-https</code>。DNS 验证无需开放 80 端口。</p>
+        </article>
+        <article class="card"><p class="eyebrow">RECOVERY</p><h2>备份与恢复</h2><p class="muted">备份含节点密钥与流量，不含管理员密码、Cloudflare Token 或证书私钥。</p>
+          <div class="button-row"><button id="backup">下载备份</button><button id="restore">恢复备份</button><button id="rollback" class="danger">回退上次配置</button></div>
+          <input id="restore-file" type="file" accept="application/json,.json" hidden>
+          <p class="fine">请妥善保管备份文件。仅支持本面板 JSON 格式；旧 x-ui 需手动迁移。</p>
+        </article>
+        <article class="card"><p class="eyebrow">CORE</p><h2>独立的 Xray 服务</h2><p class="muted" id="core-detail">—</p><button id="restart-core">重启 Xray</button>
+          <p>核心更新与二进制回滚通过服务器执行：</p><pre>sudo panelctl core update
+sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测试现有配置；更新或重启会短暂中断节点连接。</p>
+        </article>
+        <article class="card"><p class="eyebrow">ACTIVITY</p><h2>最近操作</h2><ol id="audit" class="audit"></ol></article>
+      </div>
+    </section>
+    <footer><span>Personal Panel</span><span>本机优先 · 官方 Xray 核心 · 无外部前端 CDN</span></footer>
+  </main>
+</div>
+<dialog id="node-dialog">
+  <form id="node-form">
+    <div class="dialog-head"><div><p class="eyebrow">INBOUND</p><h2 id="node-title">新建入站</h2></div><button type="button" class="close" data-close="node-dialog" aria-label="关闭">×</button></div>
+    <div class="form-grid">
+      <label>名称<input name="name" required maxlength="80"></label>
+      <label>协议<select name="protocol"><option value="vless-reality">VLESS · REALITY · Vision</option><option value="vless-ws-tls">VLESS · WebSocket · TLS</option><option value="vmess-ws-tls">VMess · WebSocket · TLS</option><option value="trojan-tls">Trojan · TCP · TLS</option><option value="shadowsocks2022">Shadowsocks 2022 · AES-128-GCM</option></select></label>
+      <label>监听 IP<input name="listen" required value="::"></label>
+      <label>端口<input name="port" type="number" required min="1" max="65535" value="20000"></label>
+      <label>分享地址（可选）<input name="address" placeholder="留空使用全局设置" maxlength="253"></label>
+      <label class="check"><input name="enabled" type="checkbox" checked> 启用此入站</label>
+      <label data-protocol="tls reality">SNI 域名<input name="sni" placeholder="你选择的域名"></label>
+      <label data-protocol="ws">WebSocket 路径<input name="path" value="/ws"></label>
+      <label data-protocol="reality">REALITY 目标域名<input name="dest" placeholder="与 SNI 一致或经过验证的目标"></label>
+      <label data-protocol="reality">目标端口<input name="dest_port" type="number" min="1" max="65535" value="443"></label>
+      <label data-protocol="reality">私钥<input name="private_key" type="password" autocomplete="off"></label>
+      <label data-protocol="reality">公钥<input name="public_key" autocomplete="off"></label>
+      <label data-protocol="reality">Short ID<input name="short_id" maxlength="16"></label>
+      <div data-protocol="reality" class="field-action"><button type="button" id="generate-keys">重新生成 REALITY 密钥</button></div>
+      <label data-protocol="ss">服务端主密钥<input name="server_key" type="password" autocomplete="off"></label>
+    </div>
+    <p id="protocol-note" class="notice"></p>
+    <div class="section-title compact"><h3>用户</h3><button type="button" id="add-client">＋ 添加用户</button></div>
+    <div id="client-editor"></div>
+    <div class="dialog-actions"><span id="node-error" class="error" role="alert"></span><button type="button" data-close="node-dialog">取消</button><button type="submit" class="primary">校验并应用</button></div>
+  </form>
+</dialog>
+<dialog id="share-dialog" class="share-dialog"><div class="dialog-head"><h2>导入客户端</h2><button class="close" data-close="share-dialog" aria-label="关闭">×</button></div><img id="share-qr" alt="节点分享二维码"><label>分享链接<textarea id="share-text" readonly rows="5"></textarea></label><button id="copy-link" class="primary">复制链接</button><p class="fine">分享链接包含连接密钥，请只提供给预期使用者。</p></dialog>
+</body></html>

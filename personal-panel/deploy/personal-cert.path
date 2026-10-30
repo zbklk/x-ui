@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch completed Personal Panel certificate deployment
+
+[Path]
+PathChanged=/var/lib/personal-panel-tls/reload.trigger
+Unit=personal-cert-reload.service
+
+[Install]
+WantedBy=multi-user.target

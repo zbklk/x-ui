@@ -1,0 +1,17 @@
+[Unit]
+Description=Personal Panel durable traffic and quota reconciliation
+After=personal-xray.service
+
+[Service]
+Type=oneshot
+User=personal-panel
+Group=personal-panel
+WorkingDirectory=/opt/personal-panel
+EnvironmentFile=/etc/personal-panel/panel.env
+ExecStart=/opt/personal-panel/venv/bin/python manage.py maintain
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/personal-panel /var/lib/personal-xray
+UMask=0077

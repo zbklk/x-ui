@@ -1,0 +1,52 @@
+name: Personal Panel tests
+
+on:
+  push:
+    paths: ['personal-panel/**', 'install-personal.sh', '.github/workflows/personal-panel.yml']
+  pull_request:
+    paths: ['personal-panel/**', 'install-personal.sh', '.github/workflows/personal-panel.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install pinned dependencies
+        run: python -m pip install -r personal-panel/requirements.txt
+      - name: Check Python and shell syntax
+        run: |
+          python -m compileall -q personal-panel
+          bash -n install-personal.sh personal-panel/deploy/acme-renew.sh personal-panel/deploy/cert-deployed.sh personal-panel/deploy/panelctl
+          node --check personal-panel/static/panel.js
+          python -m pip check
+      - name: Download and verify pinned official Xray
+        run: |
+          python - <<'PY'
+          import hashlib,io,json,os,pathlib,urllib.request,zipfile
+          release=json.loads(pathlib.Path('personal-panel/upstream.json').read_text())['xray']
+          asset=next(a for a in release['assets'] if a['name']=='Xray-linux-64.zip')
+          req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'personal-panel-ci'})
+          data=urllib.request.urlopen(req,timeout=60).read()
+          assert hashlib.sha256(data).hexdigest() == asset['digest'].split(':')[1]
+          binary=pathlib.Path(os.environ['RUNNER_TEMP'])/'personal-xray-test'
+          with zipfile.ZipFile(io.BytesIO(data)) as archive:
+              binary.write_bytes(archive.read('xray'))
+          binary.chmod(0o755)
+          with open(os.environ['GITHUB_ENV'],'a') as env:
+              env.write('XRAY_TEST_BINARY='+str(binary)+'\n')
+          PY
+      - name: Authentication, recovery, renewal and real protocol tests
+        working-directory: personal-panel
+        run: python -m unittest discover -s tests -v

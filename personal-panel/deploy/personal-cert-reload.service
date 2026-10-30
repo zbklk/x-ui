@@ -1,0 +1,12 @@
+[Unit]
+Description=Validate installed TLS pair and reload dedicated services
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/personal-panel
+ExecStart=/opt/personal-panel/venv/bin/python manage.py cert-deployed
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/personal-xray

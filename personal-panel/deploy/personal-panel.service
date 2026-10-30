@@ -1,0 +1,28 @@
+[Unit]
+Description=Personal Panel private management UI
+After=network.target personal-xray.service
+
+[Service]
+User=personal-panel
+Group=personal-panel
+WorkingDirectory=/opt/personal-panel
+EnvironmentFile=/etc/personal-panel/panel.env
+ExecStart=/opt/personal-panel/venv/bin/gunicorn --config gunicorn.conf.py wsgi:application
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/personal-panel /var/lib/personal-xray
+
+[Install]
+WantedBy=multi-user.target

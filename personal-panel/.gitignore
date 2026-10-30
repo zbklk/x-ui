@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.sqlite3*
+*.pem
+*.key
+*.env
+auto-backups/
+previous.json

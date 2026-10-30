@@ -1,0 +1,20 @@
+[Unit]
+Description=Personal Panel isolated Cloudflare DNS certificate renewal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=personal-acme
+Group=personal-panel
+Environment=HOME=/var/lib/personal-acme
+EnvironmentFile=/etc/personal-panel/cloudflare.env
+ExecStart=/opt/personal-panel/deploy/acme-renew.sh
+TimeoutStartSec=600
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/personal-acme /var/lib/personal-panel-tls
+CapabilityBoundingSet=

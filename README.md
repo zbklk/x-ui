@@ -13,10 +13,12 @@
 在 VPS 上执行：
 
 ```bash
+installer=$(mktemp)
 curl --fail --location --proto '=https' --proto-redir '=https' \
   https://raw.githubusercontent.com/zbklk/x-ui/main/install-personal.sh \
-  -o /tmp/install-personal.sh
-sudo bash /tmp/install-personal.sh
+  -o "$installer"
+sudo bash "$installer"
+rm -f "$installer"
 ```
 
 交互安装时设置管理员账号和密码。无人值守安装不会创建默认账号，之后执行 `sudo panelctl admin` 创建。密码至少 14 字符，输入不显示；重设账号会撤销已有会话。

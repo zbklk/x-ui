@@ -62,6 +62,10 @@ def create_app(core=None, testing=False):
         if request.method not in ("GET", "HEAD", "OPTIONS") and not hmac.compare_digest(
                 request.headers.get("X-CSRF-Token", ""), g.csrf):
             return jsonify(error="CSRF 校验失败，请刷新页面"), 403
+        if request.path == "/api/restore":
+            # A complete multi-inbound backup can exceed the per-edit limit.
+            # Raise the budget only after authentication and CSRF validation.
+            request.max_content_length = 32 * 1024 * 1024
 
     @app.after_request
     def security_headers(response):

@@ -12,22 +12,18 @@ python3 -c 'import sys; assert sys.version_info >= (3, 10), "需要 Python 3.10+
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/personal-panel"
-source_commit=local-checkout
-if [[ ! -f "$source_dir/app.py" ]]; then
-  ref=${PANEL_SOURCE_REF:-main}
-  [[ "$ref" == main || "$ref" =~ ^[a-f0-9]{40}$ ]] || { echo 'PANEL_SOURCE_REF 仅接受 main 或完整提交 SHA'; exit 1; }
-  curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    "https://api.github.com/repos/zbklk/x-ui/commits/$ref" -o "$work/commit.json"
-  source_commit=$(python3 -c 'import json,sys,re; s=json.load(open(sys.argv[1]))["sha"]; assert re.fullmatch("[a-f0-9]{40}",s); print(s)' "$work/commit.json")
-  curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    "https://github.com/zbklk/x-ui/archive/$source_commit.tar.gz" -o "$work/source.tar.gz"
-  mkdir "$work/source"
-  tar --extract --gzip --file "$work/source.tar.gz" --directory "$work/source" --strip-components=1
-  source_dir="$work/source/personal-panel"
-else
-  source_commit=$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || echo local-checkout)
-fi
+# Never auto-trust a sibling directory beside an installer downloaded into /tmp.
+# Always resolve the requested GitHub ref once and fetch that immutable snapshot.
+ref=${PANEL_SOURCE_REF:-main}
+[[ "$ref" == main || "$ref" =~ ^[a-f0-9]{40}$ ]] || { echo 'PANEL_SOURCE_REF 仅接受 main 或完整提交 SHA'; exit 1; }
+curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  "https://api.github.com/repos/zbklk/x-ui/commits/$ref" -o "$work/commit.json"
+source_commit=$(python3 -c 'import json,sys,re; s=json.load(open(sys.argv[1]))["sha"]; assert re.fullmatch("[a-f0-9]{40}",s); print(s)' "$work/commit.json")
+curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  "https://github.com/zbklk/x-ui/archive/$source_commit.tar.gz" -o "$work/source.tar.gz"
+mkdir "$work/source"
+tar --extract --gzip --file "$work/source.tar.gz" --directory "$work/source" --strip-components=1
+source_dir="$work/source/personal-panel"
 
 getent group personal-panel >/dev/null || groupadd --system personal-panel
 getent group personal-acme >/dev/null || groupadd --system personal-acme

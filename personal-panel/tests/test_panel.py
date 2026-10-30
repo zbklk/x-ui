@@ -200,10 +200,21 @@ class APITests(unittest.TestCase):
 
     def test_oversize_invalid_backup_and_no_file_disclosure(self):
         self.login()
-        self.assertEqual(self.client.post("/api/restore", data=b"x"*(1024*1024+1), content_type="application/json", headers={"X-CSRF-Token":self.csrf}).status_code, 413)
+        self.assertEqual(self.client.post("/api/settings", data=b"x"*(1024*1024+1), content_type="application/json", headers={"X-CSRF-Token":self.csrf}).status_code, 413)
         self.assertEqual(self.post("/api/restore", {"format": "personal-panel-v1", "state": {"nodes": "bad"}}).status_code, 400)
         self.assertEqual(self.client.get('/static/../../core.py').status_code, 404)
         self.assertEqual(self.client.get('/api/cloudflare').status_code, 404)
+
+    def test_backup_restore_has_larger_authenticated_budget(self):
+        backup = self.core.backup()
+        backup['ignored_export_metadata'] = 'x' * (1024 * 1024)
+        self.assertEqual(self.client.post('/api/restore', json=backup).status_code, 401)
+        self.login()
+        self.assertEqual(self.post('/api/restore', backup).status_code, 200)
+        response = self.client.post('/api/restore', content_type='application/json',
+                                   headers={'X-CSRF-Token': self.csrf},
+                                   environ_overrides={'CONTENT_LENGTH': str(32*1024*1024+1)})
+        self.assertEqual(response.status_code, 413)
 
     def test_logout_and_revoked_sessions(self):
         self.login()

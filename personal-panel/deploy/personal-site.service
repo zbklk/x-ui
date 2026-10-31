@@ -1,0 +1,29 @@
+[Unit]
+Description=Personal HTTPS website
+After=network.target
+ConditionPathExists=/etc/personal-panel/site.env
+
+[Service]
+User=personal-site
+Group=personal-panel
+WorkingDirectory=/opt/personal-panel
+EnvironmentFile=/etc/personal-panel/site.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/personal-panel/venv/bin/python /opt/personal-panel/site_server.py
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

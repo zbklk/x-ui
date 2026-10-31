@@ -58,8 +58,9 @@ try:
     p=Path('/etc/personal-panel/panel.env')
     values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
     assert port != int(values.get('PANEL_STATS_PORT','18387'))
+    assert port != int(values.get('PANEL_SITE_PORT','0'))
 except (ValueError,AssertionError):
-    sys.exit('管理端口需在 1024–65535 之间，且不能与统计端口相同')
+    sys.exit('管理端口需在 1024–65535 之间，且不能与统计或自有小站端口相同')
 print(port)
 PY
 )
@@ -68,6 +69,7 @@ getent group personal-panel >/dev/null || groupadd --system personal-panel
 getent group personal-acme >/dev/null || groupadd --system personal-acme
 id personal-panel >/dev/null 2>&1 || useradd --system --gid personal-panel --home-dir /nonexistent --shell /usr/sbin/nologin personal-panel
 id personal-acme >/dev/null 2>&1 || useradd --system --gid personal-acme --home-dir /var/lib/personal-acme --shell /usr/sbin/nologin personal-acme
+id personal-site >/dev/null 2>&1 || useradd --system --gid personal-panel --home-dir /nonexistent --shell /usr/sbin/nologin personal-site
 install -d -m 755 /opt/personal-panel
 install -d -m 700 /etc/personal-panel
 install -d -m 700 -o personal-panel -g personal-panel /var/lib/personal-panel /var/lib/personal-xray
@@ -89,10 +91,10 @@ for old in sorted(folder.glob('before-install-*.sqlite3'))[:-7]:
     old.unlink()
 PY
 fi
-for file in app.py core.py access.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json; do
+for file in app.py core.py access.py ownsite.py site_server.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json; do
   install -m 644 "$source_dir/$file" "/opt/personal-panel/$file"
 done
-for directory in templates static deploy; do
+for directory in templates static deploy site; do
   install -d -m 755 "/opt/personal-panel/$directory"
   cp -a "$source_dir/$directory/." "/opt/personal-panel/$directory/"
 done
@@ -137,9 +139,30 @@ panelctl access "$install_access" --port "$selected_port" --no-restart
 systemctl enable --now personal-panel.service
 systemctl is-active --quiet personal-panel.service personal-xray.service
 panelctl access check
+# An existing owned site keeps its domain and certificate during upgrades.
+site_domain=${PANEL_SITE_DOMAIN:-$(python3 - <<'PY'
+from pathlib import Path
+p=Path('/etc/personal-panel/site.env')
+values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
+print(values.get('PANEL_SITE_DOMAIN',''))
+PY
+)}
+if [[ -t 0 && -z "$site_domain" ]]; then
+  printf '%s\n' '可选：创建 HTTPS 小站并预设 REALITY 目标。域名 A/AAAA 应指向本机，Cloudflare 使用 DNS only（灰云）。'
+  printf '%s\n' '证书使用本域名的 DNS 编辑 API Token（无需 Global API Key）；输入留在 VPS 上，定时自动续签。'
+  read -r -p '自有域名（留空跳过）：' site_domain
+fi
+if [[ -n "$site_domain" ]]; then
+  site_options=()
+  [[ -z ${PANEL_SITE_PORT:-} ]] || site_options+=(--port "$PANEL_SITE_PORT")
+  if ! panelctl site "$site_domain" "${site_options[@]}"; then
+    printf '%s\n' '面板已完成升级，但 HTTPS 小站未配置成功。请检查 DNS、Token 和服务日志，再运行 sudo panelctl site 你的域名。'
+    exit 1
+  fi
+fi
 cat <<'MSG'
 
-Personal Panel 0.2.0 已安装，访问模式和地址见上方输出。
+Personal Panel 0.3.0 已安装，访问模式和地址见上方输出。
 如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin
@@ -148,6 +171,7 @@ Personal Panel 0.2.0 已安装，访问模式和地址见上方输出。
 修改管理端口：sudo panelctl access public --port 54323
 改回 SSH 隧道模式：sudo panelctl access private
 证书与自动续签：sudo panelctl cert panel.example.com
+自有 HTTPS 小站与 REALITY 预设：sudo panelctl site www.example.com
 面板也使用 HTTPS：sudo panelctl cert panel.example.com --panel-https
 查看状态：sudo panelctl status
 MSG

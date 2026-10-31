@@ -42,6 +42,7 @@ function render(){
   const c=status.certificate;$('cert-days').textContent=c.present?`${c.days_left} 天`:'未配置';
   $('cert-name').textContent=c.present?c.names.join(', '):'REALITY / SS2022 无需证书';
   $('cert-detail').textContent=c.present?`${c.names.join(', ')} · 到期 ${date(c.expires_at)}`:'尚未配置证书。';
+  const site=status.site;$('site-detail').textContent=site?`${site.url} · REALITY 目标端口 ${site.port}，新建入站会自动填写。`:'尚未配置。安装时输入域名，或在 VPS 运行下方命令。';
   $('empty').hidden=state.nodes.length>0;$('nodes').replaceChildren();
   for(const n of state.nodes){
     const edit=el('button',{onclick:()=>openNode(n)},'编辑 / 用户');
@@ -74,11 +75,12 @@ function addClient(c){
  $('client-editor').append(row);
 }
 function protocolFields(){const p=nodeForm.elements.protocol.value;for(const group of document.querySelectorAll('[data-protocol]')){const flags=group.dataset.protocol.split(' ');group.hidden=!flags.some(x=>x==='reality'?p==='vless-reality':x==='ws'?p.includes('ws'):x==='ss'?p==='shadowsocks2022':p!=='vless-reality'&&p!=='shadowsocks2022');}
- $('protocol-note').textContent=p==='vless-reality'?'REALITY 不使用面板证书。请自行选择并验证可达的 TLS 1.3 目标域名，公钥需要与私钥对应。':p==='shadowsocks2022'?'SS2022 使用服务端主密钥与用户密钥组合，不需要域名证书。':'TLS 入站需要先在“证书与维护”中签发证书；SNI 应被该证书覆盖。';
+ const site=snapshot?.status.site;
+ $('protocol-note').textContent=p==='vless-reality'?(site?`已配置自有 HTTPS 小站 ${site.domain}:${site.port}。使用它时 SNI 和目标域名均填 ${site.domain}，目标端口填 ${site.port}；入站请使用其他端口。`:'REALITY 不使用面板证书。可在安装时创建自有 HTTPS 小站，或自行选择并验证可达的 TLS 1.3 目标域名。公钥需要与私钥对应。'):p==='shadowsocks2022'?'SS2022 使用服务端主密钥与用户密钥组合，不需要域名证书。':'TLS 入站需要先在“证书与维护”中签发证书；SNI 应被该证书覆盖。';
 }
 async function openNode(n=null){
  editing=n?n.id:null;nodeForm.reset();$('node-error').textContent='';$('node-title').textContent=n?'编辑入站与用户':'新建入站';$('client-editor').replaceChildren();
- if(n){for(const [k,v] of Object.entries(n)){const input=nodeForm.elements[k];if(input){if(input.type==='checkbox')input.checked=v;else input.value=v;}}n.clients.forEach(addClient);}else{nodeForm.elements.name.value='我的节点';nodeForm.elements.port.value=20000;nodeForm.elements.server_key.value=randKey();addClient(newClient());}
+ if(n){for(const [k,v] of Object.entries(n)){const input=nodeForm.elements[k];if(input){if(input.type==='checkbox')input.checked=v;else input.value=v;}}n.clients.forEach(addClient);}else{nodeForm.elements.name.value='我的节点';nodeForm.elements.port.value=20000;nodeForm.elements.server_key.value=randKey();const site=snapshot?.status.site;if(site){nodeForm.elements.sni.value=site.domain;nodeForm.elements.dest.value=site.domain;nodeForm.elements.dest_port.value=site.port;if(!snapshot.state.settings.public_address)nodeForm.elements.address.value=site.domain;}addClient(newClient());}
  protocolFields();$('node-dialog').showModal();
  if(!n)try{const keys=await api('/api/keypair','POST');for(const [k,v] of Object.entries(keys))nodeForm.elements[k].value=v;}catch(e){$('node-error').textContent=e.message;}
 }

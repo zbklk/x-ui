@@ -24,7 +24,7 @@ import time
 import uuid
 from urllib.parse import quote, urlencode
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 PROTOCOLS = ("vless-reality", "vless-ws-tls", "vmess-ws-tls", "trojan-tls", "shadowsocks2022")
 DEFAULT_SETTINGS = {"public_address": "", "ipv4_only": True, "block_private": True, "loglevel": "warning"}
 PRIVATE_IPS = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
@@ -191,9 +191,22 @@ def active_client(c, usage, now):
         not c["quota_bytes"] or u.get("up", 0) + u.get("down", 0) < c["quota_bytes"])
 
 
+def owned_site(environ=None):
+    env = os.environ if environ is None else environ
+    domain = env.get("PANEL_SITE_DOMAIN", "")
+    if not domain:
+        return None
+    domain = host(domain)
+    port = int(env.get("PANEL_SITE_PORT", "443"))
+    if not 1 <= port <= 65535:
+        raise PanelError("自有小站端口无效")
+    return {"domain": domain, "port": port, "url": f"https://{domain}" + (f":{port}" if port != 443 else "") + "/"}
+
+
 def xray_config(state, usage=None, now=None, stats_port=18387, tls_dir="/var/lib/personal-panel-tls"):
     usage, now = usage or {}, time.time() if now is None else now
     settings = state["settings"]
+    site = owned_site()
     config = {"log": {"loglevel": settings["loglevel"]},
               "stats": {}, "api": {"tag": "panel-api", "services": ["StatsService"]},
               "policy": {"levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}}},
@@ -221,6 +234,8 @@ def xray_config(state, usage=None, now=None, stats_port=18387, tls_dir="/var/lib
         clients = [c for c in n["clients"] if active_client(c, usage, now)]
         if not n["enabled"] or not clients:
             continue
+        if site and n["port"] == site["port"]:
+            raise PanelError(f"入站端口不能与自有 HTTPS 小站端口 {site['port']} 相同，请选择其他入站端口")
         protocol = n["protocol"].split("-")[0]
         inbound = {"tag": n["id"], "listen": n["listen"], "port": n["port"], "protocol": protocol,
                    "settings": {"clients": []}, "streamSettings": {"network": "tcp"}}
@@ -237,6 +252,11 @@ def xray_config(state, usage=None, now=None, stats_port=18387, tls_dir="/var/lib
             inbound["settings"].update({"method": "2022-blake3-aes-128-gcm", "password": n["server_key"], "network": "tcp,udp"})
         elif n["protocol"] == "vless-reality":
             dest = f"[{n['dest']}]" if ":" in n["dest"] else n["dest"]
+            if site and n["dest"] == site["domain"]:
+                if n["dest_port"] != site["port"]:
+                    raise PanelError(f"自有域名的 REALITY 目标端口应为小站端口 {site['port']}，不能填写入站端口")
+                # Avoid public-DNS hairpinning and accidental recursion into an inbound.
+                dest = "127.0.0.1"
             inbound["streamSettings"].update({"security": "reality", "realitySettings": {
                 "show": False, "target": f"{dest}:{n['dest_port']}", "xver": 0,
                 "serverNames": [n["sni"]], "privateKey": n["private_key"], "shortIds": [n["short_id"]]}})
@@ -538,4 +558,4 @@ class Core:
         except (OSError, ValueError, ssl.SSLError):
             pass
         return {"version": VERSION, "core": version, "core_status": running,
-                "stats": meta, "certificate": cert, "audit": audit}
+                "stats": meta, "certificate": cert, "site": owned_site(), "audit": audit}

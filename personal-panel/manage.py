@@ -31,6 +31,7 @@ from access import AccessPolicy, DEFAULT_HOSTS, access_url, make_bind
 ROOT = Path(__file__).resolve().parent
 INSTALL = Path("/opt/personal-panel")
 PANEL_ENV = Path("/etc/personal-panel/panel.env")
+CLOUDFLARE_ENV = Path("/etc/personal-panel/cloudflare.env")
 
 
 def root_only():
@@ -266,6 +267,8 @@ def configure_access(args):
         policy = AccessPolicy.from_env(values)
         if port == int(values.get("PANEL_STATS_PORT", "18387")):
             raise PanelError("管理端口不能与统计端口相同")
+        if port == int(values.get("PANEL_SITE_PORT", "0")):
+            raise PanelError("管理端口不能与自有小站端口相同")
         if policy.tls:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             cert_folder = Path(values.get("PANEL_TLS_DIR", "/var/lib/personal-panel-tls"))
@@ -294,12 +297,13 @@ def certificate(args):
     domain = host(args.domain)
     if "." not in domain or ":" in domain or re.fullmatch(r"[\d.]+", domain):
         raise PanelError("需要可公开验证的域名，不能使用 IP 或通配符")
-    path = Path("/etc/personal-panel/cloudflare.env")
+    path = CLOUDFLARE_ENV
     existing = env_values(path)
     if existing.get("PANEL_DOMAIN") and existing["PANEL_DOMAIN"] != domain:
         raise PanelError("本安装仅管理一个证书域名；更换域名请先备份并清理专用 ACME 状态，勿修改旧 x-ui 的 ACME 目录")
-    token = getpass.getpass("Cloudflare API Token（输入不显示）：").strip()
-    zone = input("该域名所属 Cloudflare Zone ID：").strip()
+    reuse = existing.get("PANEL_DOMAIN") == domain and not getattr(args, "replace_token", False)
+    token = existing.get("CF_Token", "") if reuse else getpass.getpass("Cloudflare API Token（输入不显示）：").strip()
+    zone = existing.get("CF_Zone_ID", "") if reuse else input("该域名所属 Cloudflare Zone ID：").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{20,512}", token) or not re.fullmatch(r"[0-9a-fA-F]{32}", zone):
         raise PanelError("Token 或 Zone ID 格式不正确")
     if not (INSTALL / "acme/acme.sh").exists():
@@ -309,7 +313,7 @@ def certificate(args):
     service("start", "personal-acme.service")
     service("enable", "--now", "personal-acme.timer")
     if args.panel_https:
-        panel_env = Path("/etc/personal-panel/panel.env")
+        panel_env = PANEL_ENV
         values = env_values(panel_env)
         values["PANEL_TLS"] = "on"
         values["PANEL_PUBLIC_ADDRESS"] = domain
@@ -332,8 +336,11 @@ def cert_deployed():
     if config.exists() and '"certificateFile"' in config.read_text():
         atomic_write(config.parent / "reload.trigger", str(time.time_ns()))
         os.chown(config.parent / "reload.trigger", pwd.getpwnam("personal-panel").pw_uid, pwd.getpwnam("personal-panel").pw_gid)
-    if env_values(Path("/etc/personal-panel/panel.env")).get("PANEL_TLS") == "on":
+    if env_values(PANEL_ENV).get("PANEL_TLS") == "on":
         service("reload", "personal-panel.service")
+    from ownsite import SITE_ENV
+    if SITE_ENV.exists():
+        service("try-restart", "personal-site.service")
 
 
 def admin(args):
@@ -393,6 +400,10 @@ def main():
     p = commands.add_parser("cert")
     p.add_argument("domain")
     p.add_argument("--panel-https", action="store_true")
+    p.add_argument("--replace-token", action="store_true", help="重新输入 Cloudflare Token")
+    p = commands.add_parser("site", help="创建自有 HTTPS 小站、自动续签并预设 REALITY 目标")
+    p.add_argument("domain")
+    p.add_argument("--port", type=int, help="网站端口；默认自动选择 443 / 8443 / 9443")
     p = commands.add_parser("core")
     p.add_argument("action", choices=("install", "update", "rollback"))
     args = parser.parse_args()
@@ -409,6 +420,9 @@ def main():
             certificate(args)
         elif args.command == "cert-deployed":
             cert_deployed()
+        elif args.command == "site":
+            from ownsite import setup
+            setup(args, sys.modules[__name__])
         elif args.command == "access":
             configure_access(args)
         elif args.command == "maintain":

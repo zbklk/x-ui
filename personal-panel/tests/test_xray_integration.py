@@ -11,6 +11,7 @@ from pathlib import Path
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -132,17 +133,33 @@ class XrayIntegrationTests(unittest.TestCase):
         worker = threading.Thread(target=httpd.serve_forever, daemon=True)
         worker.start()
         try:
-            for protocol in ("shadowsocks2022", "trojan-tls", "vless-ws-tls", "vmess-ws-tls"):
+            site_port = port()
+            root = Path(self.tmp.name)
+            with (root / "site.log").open("wb") as output:
+                site = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parents[1] / "site_server.py")],
+                    env=dict(os.environ, PANEL_SITE_PORT=str(site_port), PANEL_TLS_DIR=self.core.tls_dir), stdout=output, stderr=output)
+            site.panel_log = root / "site.log"
+            self.processes.append(site)
+            wait_port(site_port, site)
+            for protocol in ("shadowsocks2022", "trojan-tls", "vless-ws-tls", "vmess-ws-tls", "vless-reality"):
                 with self.subTest(protocol=protocol):
                     n = self.sample(protocol)
+                    if protocol == "vless-reality":
+                        n["dest_port"] = site_port
                     state = self.core.state()
                     state["settings"]["block_private"] = False  # Only for loopback fixtures.
                     state["settings"]["loglevel"] = "info"
                     state["nodes"] = [n]
-                    server_config = xray_config(state, stats_port=self.core.stats_port, tls_dir=self.core.tls_dir)
+                    from unittest.mock import patch
+                    with patch.dict(os.environ, PANEL_SITE_DOMAIN="example.com", PANEL_SITE_PORT=str(site_port)):
+                        server_config = xray_config(state, stats_port=self.core.stats_port, tls_dir=self.core.tls_dir)
                     self.core.validate_config(server_config)
                     server = self.start(server_config, "server-" + protocol)
                     wait_port(n["port"], server)
+                    if protocol == "vless-reality":
+                        from ownsite import health
+                        # An ordinary browser handshake must reach the real website too.
+                        health("example.com", n["port"], cafile=str(root / "fullchain.pem"))
                     socks_port = port()
                     c = n["clients"][0]
                     outbound = {"protocol": protocol.split("-")[0], "settings": {"servers": []}}
@@ -161,6 +178,10 @@ class XrayIntegrationTests(unittest.TestCase):
                             "certificates": [{"usage": "verify", "certificateFile": str(Path(self.tmp.name) / "fullchain.pem")} ]}}
                         if "ws" in protocol:
                             outbound["streamSettings"].update({"network": "ws", "wsSettings": {"path": n["path"], "host": "example.com"}})
+                        if protocol == "vless-reality":
+                            outbound["settings"]["vnext"][0]["users"][0]["flow"] = "xtls-rprx-vision"
+                            outbound["streamSettings"] = {"network": "tcp", "security": "reality", "realitySettings": {
+                                "serverName": n["sni"], "fingerprint": "chrome", "password": n["public_key"], "shortId": n["short_id"]}}
                     client_config = {"log": {"loglevel": "error"}, "inbounds": [{"listen": "127.0.0.1", "port": socks_port, "protocol": "socks", "settings": {"auth": "noauth"}}], "outbounds": [outbound]}
                     client = self.start(client_config, "client-" + protocol)
                     wait_port(socks_port, client)
@@ -176,8 +197,8 @@ class XrayIntegrationTests(unittest.TestCase):
                         while True:
                             try:
                                 chunk = s.recv(65536)
-                            except TimeoutError:
-                                self.fail("Proxy read timed out: " + repr(response[:200]) + server.panel_log.read_text() + client.panel_log.read_text())
+                            except (TimeoutError, ConnectionResetError):
+                                self.fail("Proxy read failed: " + repr(response[:200]) + server.panel_log.read_text() + client.panel_log.read_text())
                             if not chunk:
                                 break
                             response += chunk

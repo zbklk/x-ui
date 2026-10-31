@@ -1,6 +1,6 @@
 # Personal Panel · 自用 Xray 面板
 
-独立实现的私人节点管理面板，当前版本 **0.2.0**。
+独立实现的私人节点管理面板，当前版本 **0.3.0**。
 
 默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与官方 Xray 核心，前端无需外部 CDN。
 
@@ -18,6 +18,8 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 普通用户先执行 `sudo -i`。安装时可设置管理端口，直接回车使用默认 **54322**；首次安装还会提示创建管理员账号与密码，密码至少 14 字符、输入不回显。
 
+安装后半段可输入已解析到 VPS 的域名，自动创建简单 HTTPS 网站、申请证书、启用自动续签，并为新建 REALITY 入站预填 SNI、目标域名和目标端口。没有域名可直接回车跳过，之后随时运行 `panelctl site 你的域名`。
+
 安装完成后，直接在任何电脑或手机的浏览器打开安装输出的地址：
 
 ```text
@@ -30,7 +32,7 @@ http://你的VPS公网IP:54322/
 
 安装会尝试放行已启用的 UFW 中对应的管理 TCP 端口，不启用 UFW，也不改动 SSH 放行规则。**如启用了云平台安全组、云防火墙或其他主机防火墙，还需放行所选管理端口的 TCP。**统计端口 18387 始终只供本机使用，无需开放。
 
-### 已有 0.1.0 面板升级
+### 已有面板升级
 
 再次执行上方同一条安装命令即可。原来的管理员、密码、节点、流量与证书保留；旧版仅本机访问的配置会自动切换为公网直连。若希望继续使用默认端口，端口提示直接回车即可，无需卸载重装。
 
@@ -60,12 +62,47 @@ panelctl access public --port 55443
 | 出站 | 默认仅 IPv4；可切换双栈；默认阻止访问本机及内网 |
 | 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和 Xray 配置后写入；独立服务加载 |
 | 证书 | 单个域名、Cloudflare 指定 Zone 的 Token、DNS-01、自动续签与加载钩子 |
+| 自有网站 | 可选独立静态 HTTPS 小站、TLS 1.3 / HTTP/2、自有域名 REALITY 默认值、端口冲突与循环检查 |
 | 恢复 | JSON 导出 / 恢复、上次配置回退、每日备份保留最近 7 份 |
 | 核心 | 固定初装版本、官方发布包 SHA-256 校验、更新前校验配置、失败恢复及二进制回滚 |
 
-REALITY 需自行选择并验证可达的 TLS 目标，不预设一个声称适合所有网络的 SNI。REALITY 和 SS2022 无需证书。TLS 协议需先配置证书。
+REALITY 可使用安装器创建的自有小站，或自行选择并验证其他 TLS 目标。REALITY 入站本身和 SS2022 无需证书；自有 HTTPS 目标网站及 TLS 协议需要证书。自有目标更便于维护，但不保证在所有网络下比第三方目标更合适。
 
 防火墙需放行面板管理 TCP 端口及实际使用的节点 TCP 端口；SS2022 需要时同时放行该节点 UDP 端口。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
+
+## 可选：自有 HTTPS 网站与 REALITY 目标
+
+域名的 A 记录指向本机 IPv4；如果添加 AAAA，也需指向本机可用 IPv6。**Cloudflare 记录使用 DNS only（灰云）**，让节点直接连接 VPS。按下一节创建只授权该 Zone 的 API Token，准备好 Zone ID。
+
+新装或升级时输入该域名即可。也可以在升级到 0.3.0 后单独执行：
+
+```bash
+sudo panelctl site www.example.com
+# 如需指定网站端口：
+sudo panelctl site www.example.com --port 8443
+```
+
+脚本在 VPS 提示输入 Token（隐藏输入）及 Zone ID。已有同域名的凭据会复用。自动创建的网页文件位于 `/opt/personal-panel/site/`，独立 `personal-site.service` 运行；后续安装升级会覆盖内置网页。网站监听 IPv4 及系统支持的 IPv6。启动时验证证书链、域名、TLS 1.3 和 HTTP/2 首页；设置失败恢复原面板及小站配置。请另用浏览器确认公网网址能打开，云防火墙仍需手动放行。
+
+默认优先选 **443**；被其他服务或节点占用时选 **8443 / 9443**。不会停止占用端口的服务。显式指定的端口不可用时直接报错。新建入站自动填入：
+
+| 字段 | 示例：网站使用 443 | 网站使用 8443 时 |
+| --- | --- | --- |
+| SNI 域名 | `www.example.com` | `www.example.com` |
+| REALITY 目标域名 | `www.example.com` | `www.example.com` |
+| 目标端口 | `443` | `8443` |
+| 入站端口 | 另选，例如 `20000` | 另选，例如 `20000` |
+
+网站地址分别为 `https://www.example.com/` 或 `https://www.example.com:8443/`。域名字段不填写协议、路径或端口。管理面板继续使用原来的访问方式，例如 `http://VPS_IP:54322/`；网站证书不会自动把面板改为 HTTPS，需要时按下文另行启用。
+
+**入站与网站不能占同一个监听端口。** 生成核心配置时，自有目标被转换为 `127.0.0.1:网站端口`，SNI 仍是你的域名，避免绕公网 DNS 或回到自身入站。新建节点使用默认值；已有节点不会被批量更改。若现有启用节点与新的小站配置冲突，需先调整或停用该节点再重试。
+
+当前网站与节点 TLS 共用一个证书域名。如果已配置 `panel.example.com` 的证书，建站也应使用这个域名。域名切换与多个证书不在当前自动化范围。
+
+```bash
+sudo systemctl status personal-site.service
+sudo journalctl -u personal-site.service -n 60 --no-pager
+```
 
 ## Cloudflare 证书与自动续签
 
@@ -80,6 +117,8 @@ sudo panelctl cert panel.example.com
 当前管理一个证书域名，不申请通配符；DNS 验证不要求面板服务器开放入站 80/443，也不要求先把 A/AAAA 指向该服务器。TLS 入站的 SNI 需被证书覆盖。
 
 专用 `personal-acme` 用户运行固定上游提交的 acme.sh，每日 timer 检查是否续签。完整证书及私钥安装后，校验配对，再通知服务加载。凭据不会经过网页，网页用户不能读取 Token；不自动升级执行 ACME 上游代码。
+
+续签后，已启用的小站自动重启加载新证书；面板 HTTPS 和使用证书的 Xray 入站也收到加载通知。同域名重复运行 `cert` / `site` 会复用凭据；更换 Token 使用 `sudo panelctl cert 你的域名 --replace-token`，按提示重新输入，不放入命令参数。
 
 ```bash
 systemctl list-timers personal-acme.timer
@@ -151,6 +190,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 | --- | --- |
 | `personal-panel.service` | 普通用户网页进程，无 sudo、root 或 Linux capabilities |
 | `personal-xray.service` | 独立普通用户核心，仅授予绑定低端口的能力 |
+| `personal-site.service` | 独立 personal-site 用户，只读静态网站，仅授予绑定低端口的能力；不能读取面板数据库或 DNS Token |
 | `personal-panel-maintain.timer` | 约每 15 秒采集流量、检查额度及到期 |
 | `personal-xray.path` | 固定服务处理配置加载请求，不提供任意命令接口 |
 | `personal-acme.timer` / `personal-cert.path` | 独立续签；完整部署后通知服务加载 |
@@ -169,7 +209,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 - 额度不是实时计费边界，约 15 秒检查一次，可能超额；异常重启前尚未采集的尾部流量可能丢失，不用于对外计费。
 - `::` 在部分系统上接受双栈；严格仅 IPv6 入站需配合防火墙。网页进程不能完整试绑低于 1024 的端口；端口检查与实际绑定间也存在竞争窗口，请确认核心状态。
 - 未来核心可能移除协议，更新前保留备份。初装固定版本见 `personal-panel/upstream.json`。
-- 已验证认证、CSRF、IP 白名单、恢复、额度、续签流程模拟与更新失败恢复；固定官方核心通过五种协议配置及四种协议本机真实传输 / 统计测试。REALITY 尚未在真实公网目标上做客户端握手验收。
+- 已验证认证、CSRF、IP 白名单、恢复、额度、续签流程模拟与更新失败恢复；固定官方核心通过五种协议配置及本机真实传输 / 统计测试，包含 REALITY Vision 连接自有 HTTPS 目标及普通浏览器回落；小站验证 TLS 1.3、HTTP/2 与证书域名检查。
 - 新版本还应在实际 VPS 验收公网访问及 systemd 生命周期，并用自己的域名 / Token 完成真实 ACME 签发。本地测试不等于第三方安全审计。
 
 ## 本地测试

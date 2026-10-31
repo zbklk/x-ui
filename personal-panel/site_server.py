@@ -17,9 +17,6 @@ PAGES = {"/": ("index.html", b"text/html; charset=utf-8"),
 class SiteConfig(Config):
     def create_ssl_context(self):
         context = super().create_ssl_context()
-        # REALITY requires X25519 (or a supported hybrid group). Use the stable
-        # shared baseline across Debian/Ubuntu OpenSSL and Xray versions.
-        context.set_ecdh_curve("X25519")
         # Hypercorn replaces OpenSSL's default options. REALITY expects the TLS
         # 1.3 compatibility ChangeCipherSpec record sent by ordinary web servers.
         context.options |= ssl.OP_ENABLE_MIDDLEBOX_COMPAT

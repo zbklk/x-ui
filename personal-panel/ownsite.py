@@ -144,6 +144,8 @@ def setup(args, ops):
         ops.service("restart", "personal-site.service")
         wait_health(domain, port)
         values.update(PANEL_SITE_DOMAIN=domain, PANEL_SITE_PORT=str(port))
+        if getattr(args, "panel_https", False):
+            values.update(PANEL_TLS="on", PANEL_PUBLIC_ADDRESS=domain)
         hosts = values.get("PANEL_ALLOWED_HOSTS", "").split(",")
         values["PANEL_ALLOWED_HOSTS"] = ",".join(dict.fromkeys(h for h in hosts + [domain] if h))
         ops.atomic_write(ops.PANEL_ENV, "".join(f"{k}={v}\n" for k, v in values.items()), 0o600)
@@ -166,4 +168,7 @@ def setup(args, ops):
     suffix = "" if port == 443 else f":{port}"
     print(f"小站已启用：https://{domain}{suffix}/ （TLS 1.3 / HTTP/2 本机检查通过）")
     print(f"新建 REALITY 自动填写：SNI={domain}，目标域名={domain}，目标端口={port}。入站端口请使用其他端口。")
-    print("证书定时续签并自动重启小站加载；面板原有 HTTP / HTTPS 访问方式保持当前设置。")
+    print("证书定时续签并自动通知网站及已启用 HTTPS 的面板加载。")
+    if getattr(args, "panel_https", False):
+        ops.show_access(values)
+        print("请使用上方 HTTPS 域名地址登录面板，再创建节点；管理端口和访问范围已保留。")

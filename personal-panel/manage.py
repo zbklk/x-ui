@@ -404,6 +404,7 @@ def main():
     p = commands.add_parser("site", help="创建自有 HTTPS 小站、自动续签并预设 REALITY 目标")
     p.add_argument("domain")
     p.add_argument("--port", type=int, help="网站端口；默认自动选择 443 / 8443 / 9443")
+    p.add_argument("--panel-https", action="store_true", help="小站验证成功后，面板共用证书并输出域名 HTTPS 登录地址")
     p = commands.add_parser("core")
     p.add_argument("action", choices=("install", "update", "rollback"))
     args = parser.parse_args()

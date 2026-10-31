@@ -148,21 +148,21 @@ print(values.get('PANEL_SITE_DOMAIN',''))
 PY
 )}
 if [[ -t 0 && -z "$site_domain" ]]; then
-  printf '%s\n' '可选：创建 HTTPS 小站并预设 REALITY 目标。域名 A/AAAA 应指向本机，Cloudflare 使用 DNS only（灰云）。'
+  printf '%s\n' '可选：创建 HTTPS 小站，启用域名 HTTPS 面板登录，并预设 REALITY 目标。域名 A/AAAA 应指向本机，Cloudflare 使用 DNS only（灰云）。'
   printf '%s\n' '证书使用本域名的 DNS 编辑 API Token（无需 Global API Key）；输入留在 VPS 上，定时自动续签。'
   read -r -p '自有域名（留空跳过）：' site_domain
 fi
 if [[ -n "$site_domain" ]]; then
-  site_options=()
+  site_options=(--panel-https)
   [[ -z ${PANEL_SITE_PORT:-} ]] || site_options+=(--port "$PANEL_SITE_PORT")
   if ! panelctl site "$site_domain" "${site_options[@]}"; then
-    printf '%s\n' '面板已完成升级，但 HTTPS 小站未配置成功。请检查 DNS、Token 和服务日志，再运行 sudo panelctl site 你的域名。'
+    printf '%s\n' '面板已完成升级，但域名 HTTPS 设置未完成。请检查 DNS、Token 和服务日志，再运行 sudo panelctl site 你的域名 --panel-https。'
     exit 1
   fi
 fi
 cat <<'MSG'
 
-Personal Panel 0.3.0 已安装，访问模式和地址见上方输出。
+Personal Panel 0.3.1 已安装。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
 如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin
@@ -171,7 +171,7 @@ Personal Panel 0.3.0 已安装，访问模式和地址见上方输出。
 修改管理端口：sudo panelctl access public --port 54323
 改回 SSH 隧道模式：sudo panelctl access private
 证书与自动续签：sudo panelctl cert panel.example.com
-自有 HTTPS 小站与 REALITY 预设：sudo panelctl site www.example.com
+自有小站、HTTPS 面板与 REALITY 预设：sudo panelctl site www.example.com --panel-https
 面板也使用 HTTPS：sudo panelctl cert panel.example.com --panel-https
 查看状态：sudo panelctl status
 MSG

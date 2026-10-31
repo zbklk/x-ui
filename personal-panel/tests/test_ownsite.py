@@ -114,6 +114,41 @@ class SiteConfigurationTests(unittest.TestCase):
                 manage.certificate(argparse.Namespace(domain="example.com", panel_https=False, replace_token=False))
             service.assert_any_call("enable", "--now", "personal-acme.timer")
 
+    def test_shared_certificate_https_keeps_listener_and_rolls_back_failed_panel(self):
+        for mode, fail in (("public", False), ("private", False), ("public", True)):
+            with self.subTest(mode=mode, fail=fail), tempfile.TemporaryDirectory() as folder:
+                panel, site = Path(folder) / "panel.env", Path(folder) / "site.env"
+                bind = "0.0.0.0:55444" if mode == "public" else "127.0.0.1:55444"
+                clients = "127.0.0.0/8,198.51.100.11/32" if mode == "public" else "127.0.0.0/8,::1/128"
+                original = f"PANEL_ACCESS={mode}\nPANEL_BIND={bind}\nPANEL_TLS=off\nPANEL_ALLOWED_CLIENTS={clients}\nPANEL_PUBLIC_ADDRESS=203.0.113.10\n"
+                panel.write_text(original)
+                ops = types.SimpleNamespace(root_only=Mock(), PANEL_ENV=panel, env_values=manage.env_values,
+                    atomic_write=manage.atomic_write, service=Mock(return_value=types.SimpleNamespace(returncode=3)),
+                    certificate=Mock(), panel_health=Mock(side_effect=PanelError("HTTPS startup failed") if fail else None),
+                    AccessPolicy=manage.AccessPolicy, show_access=Mock(), open_management_firewall=Mock(return_value="firewall checked"))
+                with patch.object(ownsite, "SITE_ENV", site), patch.object(ownsite, "choose_port", return_value=8443), patch.object(ownsite, "wait_health"):
+                    args = argparse.Namespace(domain="example.com", port=None, panel_https=True)
+                    if fail:
+                        with self.assertRaisesRegex(PanelError, "恢复"):
+                            ownsite.setup(args, ops)
+                        self.assertEqual(panel.read_text(), original)
+                        self.assertFalse(site.exists())
+                        ops.show_access.assert_not_called()
+                    else:
+                        ownsite.setup(args, ops)
+                        values = manage.env_values(panel)
+                        self.assertEqual(values["PANEL_TLS"], "on")
+                        self.assertEqual(values["PANEL_PUBLIC_ADDRESS"], "example.com")
+                        self.assertEqual(values["PANEL_BIND"], bind)
+                        self.assertEqual(values["PANEL_ALLOWED_CLIENTS"], clients)
+                        self.assertIn("example.com", values["PANEL_ALLOWED_HOSTS"].split(","))
+                        self.assertTrue(ops.panel_health.call_args.args[0].tls)
+                        if mode == "public":
+                            self.assertEqual(manage.access_url(ops.panel_health.call_args.args[0], values["PANEL_PUBLIC_ADDRESS"]),
+                                             "https://example.com:55444/")
+                        ops.show_access.assert_called_once_with(values)
+                self.assertFalse(ops.certificate.call_args.args[0].panel_https)
+
     def test_certificate_deployment_reloads_owned_site(self):
         with tempfile.TemporaryDirectory() as folder:
             site = Path(folder) / "site.env"

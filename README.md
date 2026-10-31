@@ -1,6 +1,6 @@
 # Personal Panel · 自用 Xray 面板
 
-独立实现的私人节点管理面板，当前版本 **0.3.0**。
+独立实现的私人节点管理面板，当前版本 **0.3.1**。
 
 默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与官方 Xray 核心，前端无需外部 CDN。
 
@@ -18,17 +18,18 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 普通用户先执行 `sudo -i`。安装时可设置管理端口，直接回车使用默认 **54322**；首次安装还会提示创建管理员账号与密码，密码至少 14 字符、输入不回显。
 
-安装后半段可输入已解析到 VPS 的域名，自动创建简单 HTTPS 网站、申请证书、启用自动续签，并为新建 REALITY 入站预填 SNI、目标域名和目标端口。没有域名可直接回车跳过，之后随时运行 `panelctl site 你的域名`。
+安装后半段可输入已解析到 VPS 的域名，自动创建简单 HTTPS 网站、申请证书、启用自动续签，并让面板共用证书，输出 **HTTPS 域名 + 管理端口** 登录地址。登录后新建 REALITY 会预填 SNI、目标域名和目标端口。没有域名可直接回车跳过，之后随时运行 `panelctl site 你的域名 --panel-https`。
 
 安装完成后，直接在任何电脑或手机的浏览器打开安装输出的地址：
 
 ```text
-http://你的VPS公网IP:54322/
+填写域名并成功配置证书：https://你的域名:54322/
+跳过域名设置：http://你的VPS公网IP:54322/
 ```
 
 使用刚才设置的管理员账号和密码登录即可；**不需要 SSH 隧道，也不强制使用域名或固定来源 IP**。IPv6 地址需加方括号，例如 `http://[你的IPv6]:54322/`。无人值守安装不会创建默认账号，可在 VPS 执行 `panelctl admin` 创建。
 
-默认 HTTP 会明文传输登录信息；需要加密时，可按下文启用域名 HTTPS。已经配置好的 HTTPS 在升级时保留。
+填写域名时会自动启用 HTTPS；跳过域名时保留 IP + 端口的 HTTP 访问。HTTP 会明文传输登录信息；之后可按下文启用域名 HTTPS。已经配置好的 HTTPS 在升级时保留。
 
 安装会尝试放行已启用的 UFW 中对应的管理 TCP 端口，不启用 UFW，也不改动 SSH 放行规则。**如启用了云平台安全组、云防火墙或其他主机防火墙，还需放行所选管理端口的 TCP。**统计端口 18387 始终只供本机使用，无需开放。
 
@@ -58,7 +59,7 @@ panelctl access public --port 55443
 | 协议 | VLESS REALITY Vision、VLESS WS TLS、VMess WS TLS、Trojan TCP TLS、SS2022 AES-128-GCM |
 | 用户 | 单端口多用户、启停、UUID / 密码、到期时间、累计流量额度 |
 | 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；支持公网 HTTP 下生成 UUID 及复制链接 |
-| 管理访问 | 默认公网 IP + 端口；可改端口、配置 HTTPS、限制来源或切换私有模式 |
+| 管理访问 | 安装填写域名后自动 HTTPS 域名 + 端口；跳过域名可用公网 IP + 端口；支持来源限制及私有模式 |
 | 出站 | 默认仅 IPv4；可切换双栈；默认阻止访问本机及内网 |
 | 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和 Xray 配置后写入；独立服务加载 |
 | 证书 | 单个域名、Cloudflare 指定 Zone 的 Token、DNS-01、自动续签与加载钩子 |
@@ -74,12 +75,12 @@ REALITY 可使用安装器创建的自有小站，或自行选择并验证其他
 
 域名的 A 记录指向本机 IPv4；如果添加 AAAA，也需指向本机可用 IPv6。**Cloudflare 记录使用 DNS only（灰云）**，让节点直接连接 VPS。按下一节创建只授权该 Zone 的 API Token，准备好 Zone ID。
 
-新装或升级时输入该域名即可。也可以在升级到 0.3.0 后单独执行：
+新装或升级时输入该域名即可。也可以在升级到 0.3.1 后单独执行：
 
 ```bash
-sudo panelctl site www.example.com
+sudo panelctl site www.example.com --panel-https
 # 如需指定网站端口：
-sudo panelctl site www.example.com --port 8443
+sudo panelctl site www.example.com --port 8443 --panel-https
 ```
 
 脚本在 VPS 提示输入 Token（隐藏输入）及 Zone ID。已有同域名的凭据会复用。自动创建的网页文件位于 `/opt/personal-panel/site/`，独立 `personal-site.service` 运行；后续安装升级会覆盖内置网页。网站监听 IPv4 及系统支持的 IPv6。启动时验证证书链、域名、TLS 1.3 和 HTTP/2 首页；设置失败恢复原面板及小站配置。请另用浏览器确认公网网址能打开，云防火墙仍需手动放行。
@@ -93,7 +94,9 @@ sudo panelctl site www.example.com --port 8443
 | 目标端口 | `443` | `8443` |
 | 入站端口 | 另选，例如 `20000` | 另选，例如 `20000` |
 
-网站地址分别为 `https://www.example.com/` 或 `https://www.example.com:8443/`。域名字段不填写协议、路径或端口。管理面板继续使用原来的访问方式，例如 `http://VPS_IP:54322/`；网站证书不会自动把面板改为 HTTPS，需要时按下文另行启用。
+网站地址分别为 `https://www.example.com/` 或 `https://www.example.com:8443/`。域名字段不填写协议、路径或端口。**安装器会自动让管理面板共用证书**，面板地址为 `https://www.example.com:管理端口/`，例如 `https://www.example.com:54322/`；用安装时设置的管理员账号登录后即可创建节点。管理端口、节点、账号与来源限制保留；续签后网站及面板自动加载证书。原来的 `http://IP:管理端口/` 需改用 HTTPS 域名地址，HTTP 与 HTTPS 不在该端口并行提供。
+
+单独执行 `panelctl site` 时，`--panel-https` 表示同时切换面板 HTTPS；省略此参数只创建网站并保留当前面板协议。切换失败会恢复原面板配置。明确选择过 `private` 的实例仍保留私有监听，需通过原有 SSH 隧道访问，不自动扩大来源范围。
 
 **入站与网站不能占同一个监听端口。** 生成核心配置时，自有目标被转换为 `127.0.0.1:网站端口`，SNI 仍是你的域名，避免绕公网 DNS 或回到自身入站。新建节点使用默认值；已有节点不会被批量更改。若现有启用节点与新的小站配置冲突，需先调整或停用该节点再重试。
 

@@ -178,7 +178,10 @@ class PublicListenerTests(unittest.TestCase):
     def test_gunicorn_public_listener_retains_optional_https(self):
         self.listener_roundtrip(True)
 
-    def listener_roundtrip(self, tls):
+    def test_domain_https_login_validates_certificate_and_opens_workspace(self):
+        self.listener_roundtrip(True, domain="panel.example.test")
+
+    def listener_roundtrip(self, tls, domain=None):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             core = Core(folder/"data", folder/"xray", test_mode=True)
@@ -189,15 +192,23 @@ class PublicListenerTests(unittest.TestCase):
                 port = s.getsockname()[1]
             env = dict(os.environ, **PUBLIC)
             env.update(PANEL_BIND=f"0.0.0.0:{port}", PANEL_DATA_DIR=str(core.data), PANEL_XRAY_DIR=str(core.config_dir))
+            if domain:
+                env.update(PANEL_ALLOWED_HOSTS=f"localhost,127.0.0.1,[::1],{domain}", PANEL_PUBLIC_ADDRESS=domain)
             if tls:
                 subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-days","1",
-                                "-subj","/CN=127.0.0.1","-addext","subjectAltName=IP:127.0.0.1",
+                                "-subj",f"/CN={domain or '127.0.0.1'}","-addext",f"subjectAltName=DNS:{domain}" if domain else "subjectAltName=IP:127.0.0.1",
                                 "-keyout",str(folder/"key.pem"),"-out",str(folder/"fullchain.pem")],
                                check=True,capture_output=True)
                 env.update(PANEL_TLS="on",PANEL_TLS_DIR=str(folder))
                 context=ssl.create_default_context(cafile=str(folder/"fullchain.pem"))
             def connect(timeout):
-                return http.client.HTTPSConnection("127.0.0.1",port,timeout=timeout,context=context) if tls else http.client.HTTPConnection("127.0.0.1",port,timeout=timeout)
+                connection = http.client.HTTPSConnection(domain or "127.0.0.1",port,timeout=timeout,context=context) if tls else http.client.HTTPConnection("127.0.0.1",port,timeout=timeout)
+                if domain:
+                    # Resolve only the fixture domain locally; keep TLS hostname
+                    # verification and the real HTTPS login fully enabled.
+                    connection._create_connection = lambda address, timeout, source_address=None: socket.create_connection(("127.0.0.1", port), timeout, source_address)
+                return connection
+            authority = f"{domain or '203.0.113.10'}:{port}"
             process = subprocess.Popen([sys.executable,"-m","gunicorn","--config","gunicorn.conf.py","wsgi:application"],
                                        cwd=Path(__file__).resolve().parents[1], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
@@ -206,7 +217,7 @@ class PublicListenerTests(unittest.TestCase):
                         self.fail("Gunicorn public listener failed to start")
                     try:
                         connection=connect(.5)
-                        connection.request("GET","/",headers={"Host":f"203.0.113.10:{port}"})
+                        connection.request("GET","/",headers={"Host":authority})
                         response=connection.getresponse()
                         self.assertEqual(response.status,200)
                         self.assertIn(b"Personal Panel",response.read())
@@ -218,12 +229,20 @@ class PublicListenerTests(unittest.TestCase):
                     self.fail("Public listener did not become ready")
                 connection=connect(3)
                 body=json.dumps({"username":"admin","password":"a-secure-public-password"})
-                connection.request("POST","/api/login",body,headers={"Host":f"203.0.113.10:{port}","Content-Type":"application/json"})
+                connection.request("POST","/api/login",body,headers={"Host":authority,"Content-Type":"application/json"})
                 response=connection.getresponse()
                 self.assertEqual(response.status,200,response.read())
                 if tls:
                     self.assertIn("; Secure",response.getheader("Set-Cookie"))
+                cookie = response.getheader("Set-Cookie").split(";", 1)[0]
                 connection.close()
+                if domain:
+                    connection = connect(3)
+                    connection.request("GET", "/api/state", headers={"Host": authority, "Cookie": cookie})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertIn("nodes", json.loads(response.read())["state"])
+                    connection.close()
             finally:
                 process.terminate()
                 process.wait(timeout=10)

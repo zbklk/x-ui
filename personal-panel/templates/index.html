@@ -27,7 +27,7 @@
       <button class="nav" data-tab="settings">连接设置 <span>02</span></button>
       <button class="nav" data-tab="maintenance">证书与维护 <span>03</span></button>
     </nav>
-    <div class="sidebar-foot"><span class="dot"></span> 自用 · 独立维护<small id="version">v0.3.0</small></div>
+    <div class="sidebar-foot"><span class="dot"></span> 自用 · 独立维护<small id="version">v0.3.1</small></div>
   </aside>
   <main class="content">
     <header><div><p class="eyebrow">YOUR PRIVATE NETWORK</p><h1 id="page-title">概览与节点</h1></div>
@@ -57,7 +57,7 @@
     </section>
     <section id="maintenance" class="tab" hidden>
       <div class="maintenance-grid">
-        <article class="card"><p class="eyebrow">MY WEBSITE</p><h2>自有 HTTPS 小站</h2><p id="site-detail" class="muted">尚未配置。</p><pre>sudo panelctl site www.example.com</pre><p class="fine">自动建站、签发证书并续签。网站与入站使用不同端口，默认优先 443；新建 REALITY 自动填写域名与目标端口。</p></article>
+        <article class="card"><p class="eyebrow">MY WEBSITE</p><h2>自有 HTTPS 小站</h2><p id="site-detail" class="muted">尚未配置。</p><pre>sudo panelctl site www.example.com --panel-https</pre><p class="fine">自动建站、签发与续签证书，面板共用证书后可通过 HTTPS 域名 + 管理端口登录。网站默认优先 443；入站使用其他端口，新建 REALITY 自动填写域名与目标端口。</p></article>
         <article class="card"><p class="eyebrow">CERTIFICATE</p><h2>自动续签，凭据独立</h2><p id="cert-detail" class="muted">尚未配置证书。</p>
           <p>在服务器运行以下命令，按提示输入指定 Zone 的 API Token。凭据不会经过网页。</p><pre>sudo panelctl cert panel.example.com</pre>
           <p class="fine">用于节点 TLS。面板也使用 HTTPS 时，在命令末尾加 <code>--panel-https</code>。DNS 验证无需开放 80 端口。</p>

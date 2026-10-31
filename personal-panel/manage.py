@@ -388,7 +388,6 @@ def main():
     commands.add_parser("status")
     commands.add_parser("install-acme")
     commands.add_parser("cert-deployed")
-    commands.add_parser("check-core-config", help=argparse.SUPPRESS)
     p = commands.add_parser("access", help="设置公网 / 私有访问、管理端口或查看访问地址")
     p.add_argument("mode", choices=("public", "private", "show", "check"))
     p.add_argument("--port", type=int)
@@ -412,7 +411,7 @@ def main():
     p.add_argument("action", choices=("install", "update", "rollback", "migrate"))
     args = parser.parse_args()
     try:
-        if args.command in ("admin", "maintain", "status", "check-core-config"):
+        if args.command in ("admin", "maintain", "status"):
             unprivileged_cli()
         if args.command == "admin":
             admin(args)
@@ -438,9 +437,6 @@ def main():
             configure_access(args)
         elif args.command == "maintain":
             Core().maintain()
-        elif args.command == "check-core-config":
-            core = Core()
-            core.validate_config(json.loads((core.config_dir / "config.json").read_text()))
         elif args.command == "status":
             print(json.dumps(Core().status(), ensure_ascii=False, indent=2))
     except PanelError as e:

@@ -95,7 +95,7 @@ if systemctl is-active --quiet personal-xray.service; then
 fi
 cd /opt/personal-panel
 venv/bin/python - <<'PY'
-import http.client,json,socket,ssl,time
+import http.client,json,socket,ssl,time,subprocess
 from manage import env_values
 from pathlib import Path
 from ownsite import health
@@ -127,5 +127,41 @@ assert current['usage']==before['usage']
 assert current['status']['core_engine']=='sing-box'
 assert current['status']['core_status']=='active'
 assert 'stats_error' not in current['status']['stats']
-print('Real systemd rollback, migration, user statistics, owned website and existing-admin HTTPS login passed')
+def pid():
+ return subprocess.check_output(['systemctl','show','personal-core.service','--property=MainPID','--value'],text=True).strip()
+before_pid=pid()
+settings=dict(current['state']['settings'],loglevel='info')
+conn=http.client.HTTPSConnection('example.com',55444,context=context,timeout=3)
+conn._create_connection=lambda address,timeout,source_address=None:socket.create_connection(('127.0.0.1',55444),timeout)
+conn.request('POST','/api/settings',json.dumps(settings),headers={'Content-Type':'application/json','Cookie':cookie.split(';')[0],'X-CSRF-Token':json.loads(body)['csrf']})
+r=conn.getresponse();assert r.status==200,r.read();r.read();conn.close()
+for attempt in range(40):
+ try:
+  assert pid() not in ('0',before_pid)
+  query_stats(18387,timeout=.5)
+  break
+ except (OSError,ValueError,AssertionError):
+  time.sleep(.2)
+else:
+ raise AssertionError('Saving panel configuration did not reload the core')
+print('Real systemd rollback, migration, node config reload, statistics, website and existing-admin HTTPS login passed')
+PY
+before_cert_pid=$(systemctl show personal-core.service --property=MainPID --value)
+venv/bin/python manage.py cert-deployed
+venv/bin/python - "$before_cert_pid" <<'PY'
+import subprocess,sys,time
+from ownsite import health
+from stats_rpc import query_stats
+for attempt in range(40):
+ try:
+  pid=subprocess.check_output(['systemctl','show','personal-core.service','--property=MainPID','--value'],text=True).strip()
+  assert pid not in ('0',sys.argv[1])
+  query_stats(18387,timeout=.5)
+  health('example.com',25443,cafile='/var/lib/personal-panel-tls/fullchain.pem')
+  break
+ except (OSError,ValueError,AssertionError):
+  time.sleep(.2)
+else:
+ raise AssertionError('Certificate deployment did not reload the core and website')
+print('Certificate deployment hook reloaded sing-box, the HTTPS panel and website')
 PY

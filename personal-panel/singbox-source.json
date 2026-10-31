@@ -1,0 +1,7 @@
+{
+  "version": "1.14.4",
+  "commit": "c005f35300ce76427dc285481ec5695f5b179cd2",
+  "go_version": "go1.26.10",
+  "tags": "with_utls,with_v2ray_api",
+  "release_tag": "personal-sing-box-v1.14.4-1"
+}

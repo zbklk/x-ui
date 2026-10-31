@@ -1,0 +1,80 @@
+name: Build sing-box with user statistics
+
+on:
+  push:
+    paths: ['personal-panel/singbox-source.json', '.github/workflows/sing-box-core.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: personal-sing-box-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build unmodified, pinned upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["version"])')
+          commit=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["commit"])')
+          tags=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["tags"])')
+          export GOTOOLCHAIN=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["go_version"])')
+          git init upstream-sing-box
+          git -C upstream-sing-box remote add origin https://github.com/SagerNet/sing-box.git
+          git -C upstream-sing-box fetch --depth 1 origin "$commit"
+          git -C upstream-sing-box checkout --detach FETCH_HEAD
+          test "$(git -C upstream-sing-box rev-parse HEAD)" = "$commit"
+          mkdir dist
+          cd upstream-sing-box
+          go version
+          go mod verify
+          for arch in amd64 arm64; do
+            name="personal-sing-box-$version-linux-$arch"
+            mkdir -p "../dist/$name"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -buildvcs=false -tags "$tags" \
+              -ldflags "-s -w -buildid= -X github.com/sagernet/sing-box/constant.Version=$version" \
+              -o "../dist/$name/sing-box" ./cmd/sing-box
+            cp LICENSE "../dist/$name/LICENSE"
+            cp ../personal-panel/singbox-source.json "../dist/$name/SOURCE.json"
+            tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner \
+              -czf "../dist/$name.tar.gz" -C ../dist "$name"
+          done
+          ../dist/personal-sing-box-"$version"-linux-amd64/sing-box version
+          cd ../dist
+          sha256sum ./*.tar.gz > SHA256SUMS
+      - name: Publish source-described builds without replacing existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["release_tag"])')
+          cat > dist/NOTES.md <<'EOF'
+          Built from unmodified SagerNet/sing-box source, pinned by personal-panel/singbox-source.json.
+          Build tags: with_utls,with_v2ray_api. The extra statistics module preserves per-user traffic accounting and quotas.
+          Both archives contain the upstream GPL license and exact source/build metadata. This workflow is the reproducible build recipe.
+          EOF
+          if ! gh release view "$release" >/dev/null 2>&1; then
+            gh release create "$release" --target "$GITHUB_SHA" --title "$release" --notes-file dist/NOTES.md
+          fi
+          # Existing asset digests must match; a rerun may only add missing files.
+          python3 - <<'PY'
+          import hashlib,json,pathlib,subprocess
+          metadata=json.loads(pathlib.Path('personal-panel/singbox-source.json').read_text())
+          release=metadata['release_tag']
+          remote=json.loads(subprocess.check_output(['gh','api',f'repos/{__import__("os").environ["GITHUB_REPOSITORY"]}/releases/tags/{release}']))
+          assets={a['name']:a for a in remote['assets']}
+          for path in [*pathlib.Path('dist').glob('*.tar.gz'),pathlib.Path('dist/SHA256SUMS')]:
+              digest='sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
+              if path.name in assets:
+                  assert assets[path.name].get('digest') == digest, 'Refusing to replace an existing release asset'
+              else:
+                  subprocess.run(['gh','release','upload',release,str(path)],check=True)
+          PY

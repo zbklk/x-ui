@@ -1,5 +1,5 @@
 [Unit]
-Description=Personal Panel private management UI
+Description=Personal Panel authenticated management UI
 After=network.target personal-xray.service
 
 [Service]

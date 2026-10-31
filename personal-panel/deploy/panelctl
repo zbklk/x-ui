@@ -2,7 +2,7 @@
 set -euo pipefail
 cd /opt/personal-panel
 if [[ $# == 0 ]]; then
-  printf '%s\n' '用法：panelctl admin | status | cert DOMAIN [--panel-https] | core update | core rollback'
+  printf '%s\n' '用法：panelctl admin | status | access public/private/show [--port PORT] | cert DOMAIN [--panel-https] | core update | core rollback'
   exit 0
 fi
 exec /opt/personal-panel/venv/bin/python /opt/personal-panel/manage.py "$@"

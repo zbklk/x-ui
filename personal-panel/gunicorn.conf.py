@@ -1,18 +1,11 @@
-"""Do not expose plaintext management listeners outside loopback."""
-import ipaddress
+"""Explicit public/private management modes; optional TLS in either mode."""
 import os
 from pathlib import Path
-from urllib.parse import urlsplit
+from access import AccessPolicy
 
-bind = os.environ.get("PANEL_BIND", "127.0.0.1:54322")
-address = ipaddress.ip_address(urlsplit("//" + bind).hostname)
-tls = os.environ.get("PANEL_TLS", "off") == "on"
-if not address.is_loopback:
-    if not tls:
-        raise RuntimeError("Public management listener requires PANEL_TLS=on")
-    nets = [ipaddress.ip_network(n.strip()) for n in os.environ.get("PANEL_ALLOWED_CLIENTS", "").split(",") if n.strip()]
-    if not nets or any(n.prefixlen == 0 for n in nets):
-        raise RuntimeError("Public management listener requires a non-global client IP allowlist")
+policy = AccessPolicy.from_env()
+bind = policy.bind
+tls = policy.tls
 workers = 1
 worker_class = "gthread"
 threads = 4

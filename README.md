@@ -1,8 +1,8 @@
 # Personal Panel · 自用 Xray 面板
 
-独立实现的私人节点管理面板，当前版本 **0.1.0**。
+独立实现的私人节点管理面板，当前版本 **0.2.0**。
 
-默认只监听本机，通过 SSH 隧道管理；Cloudflare API Token 与网页进程隔离；提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与官方 Xray 核心，前端无需外部 CDN。
+默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与官方 Xray 核心，前端无需外部 CDN。
 
 **这不是旧 x-ui 的完整升级版，不使用闭源发布包。** 原有 Go 代码与 `install.sh` 保留，旧说明见 [README.legacy.md](README.legacy.md)。新代码位于 [personal-panel/](personal-panel/)。
 
@@ -10,27 +10,44 @@
 
 支持运行 systemd 的 **Ubuntu 22.04+ / Debian 12+**，Python 3.10+，amd64 / arm64。暂不支持 Alpine / OpenRC。
 
-以 **root 用户登录 VPS** 后，复制下面这一整行执行：
+以 **root 用户登录 VPS**，执行一行安装命令：
 
 ```bash
 bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/zbklk/x-ui/main/install-personal.sh)
 ```
 
-如果当前使用普通用户，先执行 `sudo -i` 切换到 root，再运行上面的安装命令。
+普通用户先执行 `sudo -i`。安装时可设置管理端口，直接回车使用默认 **54322**；首次安装还会提示创建管理员账号与密码，密码至少 14 字符、输入不回显。
 
-首次交互安装会提示设置管理员账号和密码。无人值守安装不会创建默认账号，之后在 VPS 执行 `panelctl admin` 创建。密码至少 14 字符，输入不显示；重设账号会撤销已有会话。
+安装完成后，直接在任何电脑或手机的浏览器打开安装输出的地址：
 
-安装后，在**自己的电脑**（不是 VPS）打开终端，替换服务器 IP 和 SSH 用户，运行：
-
-```bash
-ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
+```text
+http://你的VPS公网IP:54322/
 ```
 
-SSH 端口不是 22 时，在 `ssh` 后添加 `-p 你的SSH端口`。保持这个终端窗口和 SSH 连接，然后在自己电脑的浏览器访问 **http://127.0.0.1:54322**。
+使用刚才设置的管理员账号和密码登录即可；**不需要 SSH 隧道，也不强制使用域名或固定来源 IP**。IPv6 地址需加方括号，例如 `http://[你的IPv6]:54322/`。无人值守安装不会创建默认账号，可在 VPS 执行 `panelctl admin` 创建。
 
-面板默认只监听 VPS 本机地址，不需要向公网开放管理端口 54322。
+默认 HTTP 会明文传输登录信息；需要加密时，可按下文启用域名 HTTPS。已经配置好的 HTTPS 在升级时保留。
 
-安装不会停止旧 x-ui，不会修改旧数据库、旧证书、防火墙或 SSH 配置。新旧节点不能占用相同端口。GitHub 保存源码和脚本，面板运行在 VPS，不能部署到 GitHub Pages。
+安装会尝试放行已启用的 UFW 中对应的管理 TCP 端口，不启用 UFW，也不改动 SSH 放行规则。**如启用了云平台安全组、云防火墙或其他主机防火墙，还需放行所选管理端口的 TCP。**统计端口 18387 始终只供本机使用，无需开放。
+
+### 已有 0.1.0 面板升级
+
+再次执行上方同一条安装命令即可。原来的管理员、密码、节点、流量与证书保留；旧版仅本机访问的配置会自动切换为公网直连。若希望继续使用默认端口，端口提示直接回车即可，无需卸载重装。
+
+0.2.0 以后通过 `panelctl access private` 明确选择的私有模式，会在下次升级中保留。
+
+### 查看地址或修改端口
+
+在 VPS 执行：
+
+```bash
+panelctl access show
+panelctl access public --port 55443
+```
+
+修改后使用输出的新地址登录。也可用 `--address 你的公网IP` 指定输出地址（适合 NAT 等无法自动识别公网 IP 的环境），或通过 `--listen ::` 监听 IPv6。命令仅重启面板，保留节点和账号；启动失败自动恢复原访问配置。
+
+安装不会卸载旧 x-ui，不会修改其数据库和证书。新旧节点不能占用同一端口。GitHub 保存代码和安装脚本，面板实际运行在 VPS，不能部署到 GitHub Pages。
 
 ## 功能范围
 
@@ -38,7 +55,8 @@ SSH 端口不是 22 时，在 `ssh` 后添加 `-p 你的SSH端口`。保持这�
 | --- | --- |
 | 协议 | VLESS REALITY Vision、VLESS WS TLS、VMess WS TLS、Trojan TCP TLS、SS2022 AES-128-GCM |
 | 用户 | 单端口多用户、启停、UUID / 密码、到期时间、累计流量额度 |
-| 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址 |
+| 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；支持公网 HTTP 下生成 UUID 及复制链接 |
+| 管理访问 | 默认公网 IP + 端口；可改端口、配置 HTTPS、限制来源或切换私有模式 |
 | 出站 | 默认仅 IPv4；可切换双栈；默认阻止访问本机及内网 |
 | 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和 Xray 配置后写入；独立服务加载 |
 | 证书 | 单个域名、Cloudflare 指定 Zone 的 Token、DNS-01、自动续签与加载钩子 |
@@ -47,7 +65,7 @@ SSH 端口不是 22 时，在 `ssh` 后添加 `-p 你的SSH端口`。保持这�
 
 REALITY 需自行选择并验证可达的 TLS 目标，不预设一个声称适合所有网络的 SNI。REALITY 和 SS2022 无需证书。TLS 协议需先配置证书。
 
-如有防火墙，只放行实际使用的节点 TCP 端口；SS2022 需要时同时放行该节点 UDP 端口。默认无需向公网放行管理端口 54322 或统计端口 18387，原 SSH 放行规则照常保留。
+防火墙需放行面板管理 TCP 端口及实际使用的节点 TCP 端口；SS2022 需要时同时放行该节点 UDP 端口。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
 
 ## Cloudflare 证书与自动续签
 
@@ -73,33 +91,45 @@ sudo systemctl start personal-acme.service
 
 如果旧面板曾使用 Global API Key，本安装不改动它的任务。新配置验证后，应在 Cloudflare 轮换旧全局密钥，并同步处理其他使用旧密钥的服务。
 
-## 面板 HTTPS 与公网访问
+## 可选 HTTPS 与私有访问
 
-SSH 隧道默认不依赖域名证书。面板也要 HTTPS 时执行：
+默认公网 IP 访问不需要域名。希望加密面板登录时，将自己的域名解析到 VPS，再执行：
 
 ```bash
 sudo panelctl cert panel.example.com --panel-https
 ```
 
-仍只监听本机。隧道访问时，在自己电脑 hosts 中将 `panel.example.com` 指向 `127.0.0.1`，访问 `https://panel.example.com:54322`，使名称匹配证书。
+完成后使用 `https://panel.example.com:管理端口/` 登录；面板继续使用当前监听范围，证书自动续签。请用证书覆盖的域名访问，以避免 IP 与域名证书不匹配。凭据仍由独立证书服务管理。
 
-如需公网管理，先签好证书，使用 `sudoedit /etc/personal-panel/panel.env` 配置：
+如需限制到指定来源 IP，可显式配置（默认不限制）：
 
-```ini
-PANEL_BIND=0.0.0.0:54322
-PANEL_ALLOWED_HOSTS=panel.example.com
-PANEL_ALLOWED_CLIENTS=203.0.113.10/32
-PANEL_TLS=on
-PANEL_STATS_PORT=18387
+```bash
+sudo panelctl access public --allow-client 203.0.113.10/32
 ```
 
-将示例 IP 换成自己的管理出口 IP，重启 `personal-panel.service`，同时在云 / 本机防火墙限制该来源。程序拒绝无 TLS 的公网监听及全网 CIDR 白名单。不信任 `X-Forwarded-For`，默认不适合直接通过反向代理判断访客来源。
+该设置会同时保留本机健康检查访问。不读取浏览器提供的 `X-Forwarded-For`。使用域名时，需已通过证书命令添加该域名，或在 `/etc/personal-panel/panel.env` 的 `PANEL_ALLOWED_HOSTS` 中明确配置；任意未配置的域名会被拒绝，以防 DNS 重绑定。
+
+如果以后要恢复仅本机访问：
+
+```bash
+sudo panelctl access private
+```
+
+然后在自己的电脑建立 SSH 隧道，再打开本机地址：
+
+```bash
+ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
+```
+
+私有模式是可选项。管理端口不是 54322 时同步替换隧道端口；SSH 端口不是 22 时在 `ssh` 后加 `-p 实际SSH端口`。已经启用 HTTPS 时需使用证书域名访问。
 
 ## 维护与恢复
 
 ```bash
 sudo panelctl status
 sudo panelctl admin
+sudo panelctl access show
+sudo panelctl access public --port 54322
 sudo panelctl core update
 sudo panelctl core rollback
 sudo systemctl restart personal-panel.service
@@ -131,16 +161,16 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 | `/var/lib/personal-acme` | ACME 用户独占的账户、Token 缓存和签发状态 |
 | `/var/lib/personal-panel-tls` | 证书用户可写、面板用户只读；私钥 0640 |
 
-密码使用 scrypt 哈希；随机会话 Token 只存摘要；Cookie 为 HttpOnly / SameSite=Strict，HTTPS 时启用 Secure；写请求检查 CSRF / Origin；持久化登录失败限速。拥有服务器 root 权限的人仍能读取节点密钥与证书。
+密码使用 scrypt 哈希；随机会话 Token 只存摘要；Cookie 为 HttpOnly / SameSite=Strict，HTTPS 时启用 Secure；写请求检查 CSRF / Origin；按来源 IP 持久化限制登录失败次数，其他来源的失败不会锁住所有用户。拥有服务器 root 权限的人仍能读取节点密钥与证书。
 
 ## 限制与验证范围
 
-- 自用初版，没有旧 x-ui 的全部 Telegram、订阅、设备数限制、自定义完整 JSON 和传输方式，也没有旧数据库迁移器。
+- 当前版本没有旧 x-ui 的全部 Telegram、订阅、设备数限制、自定义完整 JSON 和传输方式，也没有旧数据库迁移器。
 - 额度不是实时计费边界，约 15 秒检查一次，可能超额；异常重启前尚未采集的尾部流量可能丢失，不用于对外计费。
 - `::` 在部分系统上接受双栈；严格仅 IPv6 入站需配合防火墙。网页进程不能完整试绑低于 1024 的端口；端口检查与实际绑定间也存在竞争窗口，请确认核心状态。
 - 未来核心可能移除协议，更新前保留备份。初装固定版本见 `personal-panel/upstream.json`。
 - 已验证认证、CSRF、IP 白名单、恢复、额度、续签流程模拟与更新失败恢复；固定官方核心通过五种协议配置及四种协议本机真实传输 / 统计测试。REALITY 尚未在真实公网目标上做客户端握手验收。
-- 仍需在实际 VPS 验收 systemd 生命周期，并用自己的域名 / Token 完成真实 ACME 签发。本地测试不等于第三方安全审计。
+- 新版本还应在实际 VPS 验收公网访问及 systemd 生命周期，并用自己的域名 / Token 完成真实 ACME 签发。本地测试不等于第三方安全审计。
 
 ## 本地测试
 

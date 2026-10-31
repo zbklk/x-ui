@@ -1,10 +1,9 @@
-"""Authenticated local-first management API. Run with Gunicorn, not Flask's dev server."""
+"""Authenticated management API. Run with Gunicorn, not Flask's dev server."""
 from __future__ import annotations
 
 import hashlib
 import hmac
 import io
-import ipaddress
 import json
 import os
 import secrets
@@ -17,6 +16,7 @@ from qrcode.image.svg import SvgPathImage
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash
 
+from access import AccessPolicy
 from core import Core, PanelError, atomic_write, clean_node, share_link, uid, xray_config
 
 COOKIE = "personal_panel_session"
@@ -29,19 +29,17 @@ def digest(token):
 def create_app(core=None, testing=False):
     app = Flask(__name__)
     core = core or Core()
-    app.config.update(MAX_CONTENT_LENGTH=1024 * 1024, TESTING=testing,
-                      TRUSTED_HOSTS=os.environ.get("PANEL_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(","))
-    networks = [ipaddress.ip_network(x.strip()) for x in os.environ.get("PANEL_ALLOWED_CLIENTS", "127.0.0.0/8,::1/128").split(",")]
-    secure = os.environ.get("PANEL_TLS", "off") == "on"
+    policy = AccessPolicy.from_env()
+    app.config.update(MAX_CONTENT_LENGTH=1024 * 1024, TESTING=testing)
+    secure = policy.tls
     app.extensions["core"] = core
+    app.extensions["access"] = policy
 
     @app.before_request
     def guard():
-        try:
-            addr = ipaddress.ip_address(request.remote_addr or "")
-        except ValueError:
-            return jsonify(error="来源地址不正确"), 403
-        if not testing and not any(addr in n for n in networks):
+        if not policy.accepts_host(request.host):
+            return jsonify(error="请使用 VPS 的 IP 地址或已配置的面板域名访问"), 400
+        if not testing and not policy.accepts_client(request.remote_addr):
             return jsonify(error="该来源 IP 不在管理白名单中"), 403
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("Origin")
@@ -113,8 +111,7 @@ def create_app(core=None, testing=False):
         with core.db() as db:
             db.execute("DELETE FROM attempts WHERE at < ?", (now - 900,))
             count = db.execute("SELECT count(*) FROM attempts WHERE ip=?", (ip,)).fetchone()[0]
-            total = db.execute("SELECT count(*) FROM attempts").fetchone()[0]
-            if count >= 8 or total >= 40:
+            if count >= 8:
                 response = jsonify(error="登录失败次数过多，请 15 分钟后重试")
                 response.headers["Retry-After"] = "900"
                 return response, 429

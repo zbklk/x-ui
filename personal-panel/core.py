@@ -24,7 +24,7 @@ import time
 import uuid
 from urllib.parse import quote, urlencode
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 PROTOCOLS = ("vless-reality", "vless-ws-tls", "vmess-ws-tls", "trojan-tls", "shadowsocks2022")
 DEFAULT_SETTINGS = {"public_address": "", "ipv4_only": True, "block_private": True, "loglevel": "warning"}
 PRIVATE_IPS = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",

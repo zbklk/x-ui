@@ -25,6 +25,45 @@ mkdir "$work/source"
 tar --extract --gzip --file "$work/source.tar.gz" --directory "$work/source" --strip-components=1
 source_dir="$work/source/personal-panel"
 
+# Old 0.1.x configs have no access-mode marker and migrate to public. Preserve
+# private mode only when an operator explicitly selected it in 0.2.x or later.
+install_access=${PANEL_ACCESS:-$(python3 - <<'PY'
+from pathlib import Path
+p=Path('/etc/personal-panel/panel.env')
+values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
+print(values.get('PANEL_ACCESS','public'))
+PY
+)}
+[[ "$install_access" == public || "$install_access" == private ]] || { echo '访问模式只能为 public 或 private'; exit 1; }
+
+default_port=$(python3 - <<'PY'
+from pathlib import Path
+from urllib.parse import urlsplit
+p=Path('/etc/personal-panel/panel.env')
+values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
+print(urlsplit('//'+values.get('PANEL_BIND','127.0.0.1:54322')).port or 54322)
+PY
+)
+selected_port=${PANEL_PORT:-$default_port}
+if [[ -t 0 && -z ${PANEL_PORT:-} ]]; then
+  read -r -p "面板管理端口 [默认 $default_port]：" input_port
+  selected_port=${input_port:-$default_port}
+fi
+selected_port=$(python3 - "$selected_port" <<'PY'
+import sys
+from pathlib import Path
+try:
+    port=int(sys.argv[1])
+    assert 1024 <= port <= 65535
+    p=Path('/etc/personal-panel/panel.env')
+    values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
+    assert port != int(values.get('PANEL_STATS_PORT','18387'))
+except (ValueError,AssertionError):
+    sys.exit('管理端口需在 1024–65535 之间，且不能与统计端口相同')
+print(port)
+PY
+)
+
 getent group personal-panel >/dev/null || groupadd --system personal-panel
 getent group personal-acme >/dev/null || groupadd --system personal-acme
 id personal-panel >/dev/null 2>&1 || useradd --system --gid personal-panel --home-dir /nonexistent --shell /usr/sbin/nologin personal-panel
@@ -50,7 +89,7 @@ for old in sorted(folder.glob('before-install-*.sqlite3'))[:-7]:
     old.unlink()
 PY
 fi
-for file in app.py core.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json; do
+for file in app.py core.py access.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json; do
   install -m 644 "$source_dir/$file" "/opt/personal-panel/$file"
 done
 for directory in templates static deploy; do
@@ -65,9 +104,10 @@ python3 -m venv /opt/personal-panel/venv
 /opt/personal-panel/venv/bin/python -m pip check
 if [[ ! -f /etc/personal-panel/panel.env ]]; then
   cat > /etc/personal-panel/panel.env <<'ENV'
-PANEL_BIND=127.0.0.1:54322
+PANEL_ACCESS=public
+PANEL_BIND=0.0.0.0:54322
 PANEL_ALLOWED_HOSTS=localhost,127.0.0.1,[::1]
-PANEL_ALLOWED_CLIENTS=127.0.0.0/8,::1/128
+PANEL_ALLOWED_CLIENTS=0.0.0.0/0,::/0
 PANEL_TLS=off
 PANEL_STATS_PORT=18387
 ENV
@@ -91,18 +131,27 @@ if [[ -t 0 ]]; then
     panelctl admin
   fi
 fi
+# Apply to upgrades as well: legacy localhost-only installations become public.
+# Existing administrator, nodes, accounting and TLS settings remain in place.
+panelctl access "$install_access" --port "$selected_port" --no-restart
 systemctl enable --now personal-panel.service
 systemctl is-active --quiet personal-panel.service personal-xray.service
+panelctl access check
 cat <<'MSG'
 
-Personal Panel 已安装。旧 x-ui 未被修改；没有开放新的公网管理端口。
+Personal Panel 0.2.0 已安装，访问模式和地址见上方输出。
+如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
+旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin
 
-在你自己的电脑运行（将 SERVER_IP 替换成服务器 IP）：
-  ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
-然后在浏览器打开：http://127.0.0.1:54322
-
+查看访问地址：sudo panelctl access show
+修改管理端口：sudo panelctl access public --port 54323
+改回 SSH 隧道模式：sudo panelctl access private
 证书与自动续签：sudo panelctl cert panel.example.com
 面板也使用 HTTPS：sudo panelctl cert panel.example.com --panel-https
 查看状态：sudo panelctl status
 MSG
+if [[ "$install_access" == private ]]; then
+  printf '%s\n' '当前保留私有模式，请先在自己的电脑建立 SSH 隧道：'
+  printf 'ssh -N -L %s:127.0.0.1:%s root@SERVER_IP\n' "$selected_port" "$selected_port"
+fi

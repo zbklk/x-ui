@@ -13,19 +13,24 @@ import platform
 import pwd
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
 import tempfile
 import time
 from urllib.request import Request, urlopen
+from urllib.request import build_opener, ProxyHandler, HTTPSHandler
+from urllib.parse import urlsplit
 import zipfile
 
 from werkzeug.security import generate_password_hash
 from core import Core, PanelError, atomic_write, host
+from access import AccessPolicy, DEFAULT_HOSTS, access_url, make_bind
 
 ROOT = Path(__file__).resolve().parent
 INSTALL = Path("/opt/personal-panel")
+PANEL_ENV = Path("/etc/personal-panel/panel.env")
 
 
 def root_only():
@@ -149,6 +154,141 @@ def env_values(path):
     return values
 
 
+def discover_public_address():
+    """Use SSH and local interfaces, without sending requests to IP lookup sites."""
+    import ipaddress
+    candidates = []
+    ssh = os.environ.get("SSH_CONNECTION", "").split()
+    if len(ssh) == 4:
+        candidates.append(ssh[2])
+    try:
+        result = subprocess.run(["ip", "-j", "address", "show", "scope", "global"],
+                                capture_output=True, text=True, timeout=3, check=True)
+        candidates.extend(a["local"] for interface in json.loads(result.stdout)
+                          for a in interface.get("addr_info", []) if a.get("local"))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    valid = []
+    for candidate in candidates:
+        try:
+            address = ipaddress.ip_address(candidate)
+            if address.is_global:
+                valid.append(address)
+        except ValueError:
+            continue
+    valid.sort(key=lambda a: a.version)
+    return str(valid[0]) if valid else ""
+
+
+def open_management_firewall(port):
+    ufw = shutil.which("ufw")
+    if not ufw:
+        return "未检测到 UFW；如有其他本机防火墙或云防火墙，请放行管理端口 TCP " + str(port)
+    try:
+        result = subprocess.run([ufw, "status"], capture_output=True, text=True, timeout=10,
+                                check=True, env=dict(os.environ, LC_ALL="C"))
+        if "Status: active" not in result.stdout:
+            return "UFW 未启用，不修改其状态；如有云防火墙，请放行 TCP " + str(port)
+        subprocess.run([ufw, "allow", f"{port}/tcp", "comment", "Personal Panel management"],
+                       capture_output=True, text=True, timeout=15, check=True)
+        return "已在 UFW 放行 TCP " + str(port) + "；如有云防火墙仍需同步放行"
+    except (OSError, subprocess.SubprocessError):
+        return "UFW 未能自动放行；请手动检查本机及云防火墙的 TCP " + str(port) + " 规则"
+
+
+def panel_health(policy):
+    address = str(policy.address)
+    if policy.address.is_unspecified:
+        address = "::1" if policy.address.version == 6 else "127.0.0.1"
+    url = access_url(policy, address) if policy.mode == "public" else access_url(policy)
+    # This is only a local startup check. Certificate trust is handled by browsers.
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl._create_unverified_context()))
+    for _ in range(12):
+        try:
+            with opener.open(url + "healthz", timeout=.5) as response:
+                if response.status == 200 and json.loads(response.read(1024)).get("ok") is True:
+                    return
+        except (OSError, ValueError):
+            pass
+        time.sleep(.25)
+    raise PanelError("面板未通过本机启动检查")
+
+
+def show_access(values):
+    policy = AccessPolicy.from_env(values)
+    address = values.get("PANEL_PUBLIC_ADDRESS", "")
+    print("访问模式：" + ("公网 IP 直连" if policy.mode == "public" else "本机 / SSH 隧道"))
+    print("面板地址：" + access_url(policy, address))
+    print("监听地址：" + policy.bind)
+    print("来源范围：" + values.get("PANEL_ALLOWED_CLIENTS", "默认"))
+    if policy.mode == "public" and not policy.tls:
+        print("当前为 HTTP 明文连接；可通过 panelctl cert DOMAIN --panel-https 启用 HTTPS。")
+    return policy
+
+
+def configure_access(args):
+    root_only()
+    if not PANEL_ENV.exists():
+        raise PanelError("请先安装 Personal Panel")
+    values = env_values(PANEL_ENV)
+    if args.mode in ("show", "check"):
+        policy = show_access(values)
+        if args.mode == "check":
+            panel_health(policy)
+        return
+    original = PANEL_ENV.read_bytes()
+    previous = dict(values)
+    try:
+        previous_port = urlsplit("//" + values.get("PANEL_BIND", "127.0.0.1:54322")).port or 54322
+        port = args.port if args.port is not None else previous_port
+        address = host(args.address) if args.address else values.get("PANEL_PUBLIC_ADDRESS", "") or discover_public_address()
+        if args.listen:
+            listen = args.listen
+        elif args.mode == "private":
+            listen = "127.0.0.1"
+        elif previous.get("PANEL_ACCESS") == "public" and previous.get("PANEL_PUBLIC_ADDRESS"):
+            listen = urlsplit("//" + previous.get("PANEL_BIND", "0.0.0.0:54322")).hostname
+        else:
+            listen = "::" if ":" in address else "0.0.0.0"
+        values.update(PANEL_ACCESS=args.mode, PANEL_BIND=make_bind(listen, port))
+        values["PANEL_ALLOWED_CLIENTS"] = ",".join(["127.0.0.0/8", "::1/128"] + args.allow_client) if args.allow_client else (
+            "0.0.0.0/0,::/0" if args.mode == "public" else "127.0.0.0/8,::1/128")
+        allowed_hosts = list(DEFAULT_HOSTS) + values.get("PANEL_ALLOWED_HOSTS", "").split(",")
+        if address:
+            values["PANEL_PUBLIC_ADDRESS"] = address
+            allowed_hosts.append(address)
+        values["PANEL_ALLOWED_HOSTS"] = ",".join(dict.fromkeys(h for h in allowed_hosts if h))
+        if args.http:
+            values["PANEL_TLS"] = "off"
+        elif args.https:
+            values["PANEL_TLS"] = "on"
+        values.setdefault("PANEL_TLS", "off")
+        policy = AccessPolicy.from_env(values)
+        if port == int(values.get("PANEL_STATS_PORT", "18387")):
+            raise PanelError("管理端口不能与统计端口相同")
+        if policy.tls:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            cert_folder = Path(values.get("PANEL_TLS_DIR", "/var/lib/personal-panel-tls"))
+            context.load_cert_chain(cert_folder / "fullchain.pem", cert_folder / "key.pem")
+    except (ValueError, OSError) as error:
+        if isinstance(error, PanelError):
+            raise
+        raise PanelError("访问设置不正确，请检查端口（1024–65535）、监听 IP、来源范围或证书") from None
+    atomic_write(PANEL_ENV.with_suffix(".env.previous"), original, 0o600)
+    atomic_write(PANEL_ENV, "".join(f"{k}={v}\n" for k, v in values.items()), 0o600)
+    if not args.no_restart:
+        try:
+            service("restart", "personal-panel.service")
+            panel_health(policy)
+        except (OSError, PanelError, subprocess.SubprocessError):
+            atomic_write(PANEL_ENV, original, 0o600)
+            service("restart", "personal-panel.service", check=False)
+            raise PanelError("新访问设置启动失败，已恢复原设置；请检查端口占用和服务日志") from None
+    if policy.mode == "public" and not args.no_firewall:
+        print(open_management_firewall(policy.port))
+    show_access(values)
+
+
 def certificate(args):
     root_only()
     domain = host(args.domain)
@@ -172,13 +312,14 @@ def certificate(args):
         panel_env = Path("/etc/personal-panel/panel.env")
         values = env_values(panel_env)
         values["PANEL_TLS"] = "on"
+        values["PANEL_PUBLIC_ADDRESS"] = domain
         hosts = values.get("PANEL_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
         values["PANEL_ALLOWED_HOSTS"] = ",".join(dict.fromkeys(hosts + [domain]))
         atomic_write(panel_env, "".join(f"{k}={v}\n" for k, v in values.items()), 0o600)
         service("restart", "personal-panel.service")
     print("证书已配置；专用 systemd timer 会自动续签。Token 未回显，网页用户无权读取。")
     if args.panel_https:
-        print("本机面板已改用 HTTPS，监听地址未改变。隧道访问时请使用证书域名并将其在客户端解析到 127.0.0.1。")
+        print("面板已改用 HTTPS，监听范围未改变。请使用证书域名访问；私有模式下仍需 SSH 隧道。")
 
 
 def cert_deployed():
@@ -238,6 +379,17 @@ def main():
     commands.add_parser("status")
     commands.add_parser("install-acme")
     commands.add_parser("cert-deployed")
+    p = commands.add_parser("access", help="设置公网 / 私有访问、管理端口或查看访问地址")
+    p.add_argument("mode", choices=("public", "private", "show", "check"))
+    p.add_argument("--port", type=int)
+    p.add_argument("--listen", help="监听 IP，例如 0.0.0.0 或 ::")
+    p.add_argument("--address", help="用于显示访问 URL 的公网 IP 或域名")
+    p.add_argument("--allow-client", action="append", help="可选：限制来源 CIDR；公网模式默认不限来源")
+    protocols = p.add_mutually_exclusive_group()
+    protocols.add_argument("--http", action="store_true")
+    protocols.add_argument("--https", action="store_true")
+    p.add_argument("--no-restart", action="store_true", help="安装流程先写配置，稍后启动服务")
+    p.add_argument("--no-firewall", action="store_true", help="不修改 UFW 规则")
     p = commands.add_parser("cert")
     p.add_argument("domain")
     p.add_argument("--panel-https", action="store_true")
@@ -257,6 +409,8 @@ def main():
             certificate(args)
         elif args.command == "cert-deployed":
             cert_deployed()
+        elif args.command == "access":
+            configure_access(args)
         elif args.command == "maintain":
             Core().maintain()
         elif args.command == "status":

@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch validated Personal Panel sing-box reload requests
+
+[Path]
+PathChanged=/var/lib/personal-core/reload.trigger
+Unit=personal-core-reload.service
+
+[Install]
+WantedBy=multi-user.target

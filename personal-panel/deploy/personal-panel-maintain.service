@@ -1,6 +1,6 @@
 [Unit]
 Description=Personal Panel durable traffic and quota reconciliation
-After=personal-xray.service
+After=personal-core.service personal-xray.service
 
 [Service]
 Type=oneshot
@@ -13,5 +13,5 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/personal-panel /var/lib/personal-xray
+ReadWritePaths=/var/lib/personal-panel /var/lib/personal-core /var/lib/personal-xray
 UMask=0077

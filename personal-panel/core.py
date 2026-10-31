@@ -24,7 +24,7 @@ import time
 import uuid
 from urllib.parse import quote, urlencode
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 PROTOCOLS = ("vless-reality", "vless-ws-tls", "vmess-ws-tls", "trojan-tls", "shadowsocks2022")
 DEFAULT_SETTINGS = {"public_address": "", "ipv4_only": True, "block_private": True, "loglevel": "warning"}
 PRIVATE_IPS = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
@@ -295,10 +295,16 @@ def share_link(n, c, default_address):
 
 
 class Core:
-    def __init__(self, data_dir=None, config_dir=None, binary=None, tls_dir=None, stats_port=None, test_mode=False):
+    def __init__(self, data_dir=None, config_dir=None, binary=None, tls_dir=None, stats_port=None, test_mode=False, engine=None):
         self.data = Path(data_dir or os.environ.get("PANEL_DATA_DIR", "/var/lib/personal-panel"))
-        self.config_dir = Path(config_dir or os.environ.get("PANEL_XRAY_DIR", "/var/lib/personal-xray"))
-        self.binary = str(binary or os.environ.get("PANEL_XRAY_BINARY", "/opt/personal-panel/core/xray"))
+        self.engine = engine or os.environ.get("PANEL_CORE_ENGINE", "xray")
+        if self.engine not in ("xray", "sing-box"):
+            raise PanelError("不支持的核心类型")
+        self.service = "personal-core.service" if self.engine == "sing-box" else "personal-xray.service"
+        default_dir = "/var/lib/personal-core" if self.engine == "sing-box" else "/var/lib/personal-xray"
+        self.config_dir = Path(config_dir or os.environ.get("PANEL_CONFIG_DIR", os.environ.get("PANEL_XRAY_DIR", default_dir)))
+        default_binary = "/opt/personal-panel/core/" + ("sing-box" if self.engine == "sing-box" else "xray")
+        self.binary = str(binary or os.environ.get("PANEL_CORE_BINARY", os.environ.get("PANEL_XRAY_BINARY", default_binary)))
         self.tls_dir = str(tls_dir or os.environ.get("PANEL_TLS_DIR", "/var/lib/personal-panel-tls"))
         self.stats_port = int(stats_port or os.environ.get("PANEL_STATS_PORT", "18387"))
         self.test_mode = test_mode
@@ -352,6 +358,12 @@ class Core:
             db.execute("INSERT INTO audit(at,action) VALUES(?,?)", (time.time(), action))
             db.execute("DELETE FROM audit WHERE id <= (SELECT coalesce(max(id),0)-500 FROM audit)")
 
+    def compile(self, state, usage=None):
+        if self.engine == "sing-box":
+            from singbox import singbox_config
+            return singbox_config(state, usage, stats_port=self.stats_port, tls_dir=self.tls_dir)
+        return xray_config(state, usage, stats_port=self.stats_port, tls_dir=self.tls_dir)
+
     def validate_config(self, config):
         content = json.dumps(config, indent=2)
         if self.test_mode:
@@ -361,12 +373,12 @@ class Core:
             with os.fdopen(fd, "w") as f:
                 f.write(content)
             try:
-                result = subprocess.run([self.binary, "run", "-test", "-config", path], capture_output=True, text=True, timeout=15)
+                result = subprocess.run(([self.binary, "check", "-c", path] if self.engine == "sing-box" else [self.binary, "run", "-test", "-config", path]), capture_output=True, text=True, timeout=15)
             except (OSError, subprocess.TimeoutExpired):
-                raise PanelError("Xray 配置校验未完成，请检查核心安装及证书") from None
+                raise PanelError("核心配置校验未完成，请检查核心安装及证书") from None
             if result.returncode:
                 # Do not send core output, which can contain paths or credentials, to browsers.
-                raise PanelError("Xray 拒绝该配置，请检查协议参数、密钥及 TLS 证书；原配置未改动")
+                raise PanelError("核心拒绝该配置，请检查协议参数、密钥及 TLS 证书；原配置未改动")
             return content
         finally:
             os.unlink(path)
@@ -380,7 +392,7 @@ class Core:
             if not self.test_mode:
                 self.check_materials(state, usage)
                 self.check_new_ports(current, state, usage)
-            content = self.validate_config(xray_config(state, usage, stats_port=self.stats_port, tls_dir=self.tls_dir))
+            content = self.validate_config(self.compile(state, usage))
             # Commit desired state first. A failed disk write is reconciled by the timer.
             previous = json.dumps({"format": "personal-panel-v1", "state": current, "usage": self.usage()})
             atomic_write(self.data / "previous.json", previous)
@@ -477,24 +489,28 @@ class Core:
 
     def keypair(self):
         try:
-            result = subprocess.run([self.binary, "x25519"], text=True, capture_output=True, timeout=5, check=True)
+            result = subprocess.run(([self.binary, "generate", "reality-keypair"] if self.engine == "sing-box" else [self.binary, "x25519"]), text=True, capture_output=True, timeout=5, check=True)
             private = re.search(r"PrivateKey:\s*(\S+)", result.stdout)[1]
             public = re.search(r"(?:PublicKey|Password(?: \(PublicKey\))?):\s*(\S+)", result.stdout)[1]
             return {"private_key": b64key(private), "public_key": b64key(public), "short_id": secrets.token_hex(8)}
         except (OSError, subprocess.SubprocessError, TypeError):
-            raise PanelError("密钥生成失败，请检查 Xray 核心") from None
+            raise PanelError("密钥生成失败，请检查代理核心") from None
 
     def collect_stats(self):
         if self.test_mode:
             return
         try:
-            pid = subprocess.run(["systemctl", "show", "personal-xray.service", "--property=MainPID", "--value"],
+            pid = subprocess.run(["systemctl", "show", self.service, "--property=MainPID", "--value"],
                                  capture_output=True, text=True, timeout=3, check=True).stdout.strip()
             start = Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()[19]
             generation = Path("/proc/sys/kernel/random/boot_id").read_text().strip() + ":" + pid + ":" + start
-            result = subprocess.run([self.binary, "api", "statsquery", f"--server=127.0.0.1:{self.stats_port}", "-pattern", "user>>>"],
-                                    capture_output=True, text=True, timeout=5, check=True)
-            stats = json.loads(result.stdout).get("stat", [])
+            if self.engine == "sing-box":
+                from stats_rpc import query_stats
+                stats = query_stats(self.stats_port)
+            else:
+                result = subprocess.run([self.binary, "api", "statsquery", f"--server=127.0.0.1:{self.stats_port}", "-pattern", "user>>>"],
+                                        capture_output=True, text=True, timeout=5, check=True)
+                stats = json.loads(result.stdout).get("stat", [])
             self.record_stats(stats, generation)
         except (OSError, ValueError, subprocess.SubprocessError, IndexError):
             with self.db() as db:
@@ -522,7 +538,7 @@ class Core:
     def maintain(self):
         with self.lock():
             self.collect_stats()
-            config = xray_config(self.state(), self.usage(), stats_port=self.stats_port, tls_dir=self.tls_dir)
+            config = self.compile(self.state(), self.usage())
             content = json.dumps(config, indent=2)
             path = self.config_dir / "config.json"
             if not path.exists() or path.read_text() != content:
@@ -542,7 +558,7 @@ class Core:
     def status(self):
         try:
             version = subprocess.run([self.binary, "version"], capture_output=True, text=True, timeout=3).stdout.splitlines()[0]
-            running = subprocess.run(["systemctl", "is-active", "personal-xray.service"], capture_output=True, text=True, timeout=3).stdout.strip()
+            running = subprocess.run(["systemctl", "is-active", self.service], capture_output=True, text=True, timeout=3).stdout.strip()
         except (OSError, IndexError, subprocess.TimeoutExpired):
             version, running = "未安装", "unknown"
         with self.db() as db:
@@ -557,5 +573,5 @@ class Core:
                     "names": [v for k, v in parsed.get("subjectAltName", []) if k == "DNS"]}
         except (OSError, ValueError, ssl.SSLError):
             pass
-        return {"version": VERSION, "core": version, "core_status": running,
+        return {"version": VERSION, "core": version, "core_status": running, "core_engine": self.engine,
                 "stats": meta, "certificate": cert, "site": owned_site(), "audit": audit}

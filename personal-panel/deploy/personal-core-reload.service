@@ -1,0 +1,11 @@
+[Unit]
+Description=Restart only the dedicated personal sing-box service
+
+[Service]
+Type=oneshot
+ExecStartPre=/opt/personal-panel/venv/bin/python /opt/personal-panel/manage.py check-core-config
+ExecStart=/usr/bin/systemctl restart personal-core.service
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes

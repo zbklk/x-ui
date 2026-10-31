@@ -27,7 +27,7 @@
       <button class="nav" data-tab="settings">连接设置 <span>02</span></button>
       <button class="nav" data-tab="maintenance">证书与维护 <span>03</span></button>
     </nav>
-    <div class="sidebar-foot"><span class="dot"></span> 自用 · 独立维护<small id="version">v0.3.1</small></div>
+    <div class="sidebar-foot"><span class="dot"></span> 自用 · 独立维护<small id="version">v0.4.0</small></div>
   </aside>
   <main class="content">
     <header><div><p class="eyebrow">YOUR PRIVATE NETWORK</p><h1 id="page-title">概览与节点</h1></div>
@@ -47,7 +47,7 @@
     </section>
     <section id="settings" class="tab" hidden>
       <form id="settings-form" class="card narrow">
-        <h2>连接默认值</h2><p class="muted">只影响本面板生成的 Xray 配置。</p>
+        <h2>连接默认值</h2><p class="muted">只影响本面板生成的代理配置。</p>
         <label>分享地址<input name="public_address" placeholder="公网 IP 或 panel.example.com" maxlength="253"><small>不填写协议或端口；入站可单独覆盖。</small></label>
         <label class="check"><input type="checkbox" name="ipv4_only"> 出站仅使用 IPv4</label>
         <label class="check"><input type="checkbox" name="block_private"> 阻止代理访问服务器内网及本机地址</label>
@@ -67,14 +67,14 @@
           <input id="restore-file" type="file" accept="application/json,.json" hidden>
           <p class="fine">请妥善保管备份文件。仅支持本面板 JSON 格式；旧 x-ui 需手动迁移。</p>
         </article>
-        <article class="card"><p class="eyebrow">CORE</p><h2>独立的 Xray 服务</h2><p class="muted" id="core-detail">—</p><button id="restart-core">重启 Xray</button>
+        <article class="card"><p class="eyebrow">CORE</p><h2>独立的代理服务</h2><p class="muted" id="core-detail">—</p><button id="restart-core">重启代理核心</button>
           <p>核心更新与二进制回滚通过服务器执行：</p><pre>sudo panelctl core update
 sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测试现有配置；更新或重启会短暂中断节点连接。</p>
         </article>
         <article class="card"><p class="eyebrow">ACTIVITY</p><h2>最近操作</h2><ol id="audit" class="audit"></ol></article>
       </div>
     </section>
-    <footer><span>Personal Panel</span><span>个人自用 · 官方 Xray 核心 · 无外部前端 CDN</span></footer>
+    <footer><span>Personal Panel</span><span>个人自用 · 独立代理核心 · 无外部前端 CDN</span></footer>
   </main>
 </div>
 <dialog id="node-dialog">

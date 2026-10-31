@@ -17,7 +17,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash
 
 from access import AccessPolicy
-from core import Core, PanelError, atomic_write, clean_node, share_link, uid, xray_config
+from core import Core, PanelError, atomic_write, clean_node, share_link, uid
 
 COOKIE = "personal_panel_session"
 
@@ -244,7 +244,7 @@ def create_app(core=None, testing=False):
             core.collect_stats()
             with core.db() as db:
                 db.execute("INSERT OR REPLACE INTO usage VALUES(?,0,0)", (client_id,))
-            content = core.validate_config(xray_config(core.state(), core.usage(), stats_port=core.stats_port, tls_dir=core.tls_dir))
+            content = core.validate_config(core.compile(core.state(), core.usage()))
             core.write_config(content)
         core.audit("重置用户流量")
         return jsonify(ok=True)
@@ -253,10 +253,10 @@ def create_app(core=None, testing=False):
     def restart_core():
         with core.lock():
             core.collect_stats()
-            content = core.validate_config(xray_config(core.state(), core.usage(), stats_port=core.stats_port, tls_dir=core.tls_dir))
+            content = core.validate_config(core.compile(core.state(), core.usage()))
             core.write_config(content)
             atomic_write(core.config_dir / "reload.trigger", str(time.time_ns()))
-        core.audit("请求重启 Xray")
+        core.audit("请求重启代理核心")
         return jsonify(ok=True)
 
     return app

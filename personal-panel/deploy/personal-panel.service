@@ -1,6 +1,6 @@
 [Unit]
 Description=Personal Panel authenticated management UI
-After=network.target personal-xray.service
+After=network.target personal-core.service personal-xray.service
 
 [Service]
 User=personal-panel
@@ -22,7 +22,7 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 CapabilityBoundingSet=
-ReadWritePaths=/var/lib/personal-panel /var/lib/personal-xray
+ReadWritePaths=/var/lib/personal-panel /var/lib/personal-core /var/lib/personal-xray
 
 [Install]
 WantedBy=multi-user.target

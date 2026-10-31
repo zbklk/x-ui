@@ -31,10 +31,10 @@ jobs:
           bash -n install-personal.sh personal-panel/deploy/acme-renew.sh personal-panel/deploy/cert-deployed.sh personal-panel/deploy/panelctl
           node --check personal-panel/static/panel.js
           python -m pip check
-      - name: Download and verify pinned official Xray
+      - name: Download and verify pinned sing-box and Xray test client
         run: |
           python - <<'PY'
-          import hashlib,io,json,os,pathlib,urllib.request,zipfile
+          import hashlib,io,json,os,pathlib,urllib.request,zipfile,tarfile
           release=json.loads(pathlib.Path('personal-panel/upstream.json').read_text())['xray']
           asset=next(a for a in release['assets'] if a['name']=='Xray-linux-64.zip')
           req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'personal-panel-ci'})
@@ -46,6 +46,18 @@ jobs:
           binary.chmod(0o755)
           with open(os.environ['GITHUB_ENV'],'a') as env:
               env.write('XRAY_TEST_BINARY='+str(binary)+'\n')
+          metadata=json.loads(pathlib.Path('personal-panel/upstream.json').read_text())
+          asset=next(a for a in metadata['singbox']['assets'] if 'linux-amd64.' in a['name'])
+          req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'personal-panel-ci'})
+          data=urllib.request.urlopen(req,timeout=60).read()
+          assert hashlib.sha256(data).hexdigest() == asset['digest'].split(':')[1]
+          binary=pathlib.Path(os.environ['RUNNER_TEMP'])/'personal-singbox-test'
+          with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as archive:
+              info=next(m for m in archive.getmembers() if m.isfile() and m.name.endswith('/sing-box'))
+              binary.write_bytes(archive.extractfile(info).read())
+          binary.chmod(0o755)
+          with open(os.environ['GITHUB_ENV'],'a') as env:
+              env.write('SINGBOX_TEST_BINARY='+str(binary)+'\n')
           PY
       - name: Authentication, recovery, renewal and real protocol tests
         working-directory: personal-panel

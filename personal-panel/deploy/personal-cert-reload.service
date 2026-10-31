@@ -9,4 +9,4 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/personal-xray
+ReadWritePaths=/var/lib/personal-core /var/lib/personal-xray

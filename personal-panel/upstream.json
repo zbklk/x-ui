@@ -14,6 +14,21 @@
       }
     ]
   },
+  "singbox": {
+    "tag_name": "personal-sing-box-v1.14.4-1",
+    "assets": [
+      {
+        "name": "personal-sing-box-1.14.4-linux-amd64.tar.gz",
+        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-1/personal-sing-box-1.14.4-linux-amd64.tar.gz",
+        "digest": "sha256:d199ac3629cc2c48d677db3ec7c00e4112d9e1cd50052ad9a97651c5e85d48f1"
+      },
+      {
+        "name": "personal-sing-box-1.14.4-linux-arm64.tar.gz",
+        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-1/personal-sing-box-1.14.4-linux-arm64.tar.gz",
+        "digest": "sha256:3cbbed245bad902e32b1f41543961b1fb05fb302d5bf4bfa9816438989444af5"
+      }
+    ]
+  },
   "acme": {
     "commit": "37d064f7b580055d3f2ddf9a9c960f754f3694d6",
     "files": [

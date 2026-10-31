@@ -38,7 +38,7 @@ function render(){
   $('node-count').textContent=`${state.nodes.length} / ${state.nodes.reduce((n,x)=>n+x.clients.length,0)}`;
   $('total-traffic').textContent=bytes(Object.values(usage).reduce((n,x)=>n+x.up+x.down,0));
   $('stats-time').textContent=status.stats.stats_success?`最近采集 ${date(Number(status.stats.stats_success))}`:'等待首次流量采集';
-  if(status.stats.stats_error)$('stats-time').textContent='采集异常，请检查 Xray 与维护任务';
+  if(status.stats.stats_error)$('stats-time').textContent='采集异常，请检查代理核心与维护任务';
   const c=status.certificate;$('cert-days').textContent=c.present?`${c.days_left} 天`:'未配置';
   $('cert-name').textContent=c.present?c.names.join(', '):'REALITY / SS2022 无需证书';
   $('cert-detail').textContent=c.present?`${c.names.join(', ')} · 到期 ${date(c.expires_at)}`:'尚未配置证书。';
@@ -91,7 +91,7 @@ $('generate-keys').onclick=()=>attempt(async()=>{if(editing&&!confirm('更换密
 nodeForm.addEventListener('submit',async e=>{e.preventDefault();$('node-error').textContent='';const button=e.target.querySelector('[type=submit]');button.disabled=true;try{
  const n={};for(const k of ['name','protocol','listen','address','sni','dest','private_key','public_key','short_id','path','server_key'])n[k]=nodeForm.elements[k].value.trim();for(const k of ['port','dest_port'])n[k]=Number(nodeForm.elements[k].value);n.enabled=nodeForm.elements.enabled.checked;
  n.clients=Array.from($('client-editor').children,row=>{const f=k=>row.querySelector(`[data-field="${k}"]`);return{id:row.dataset.id,name:f('name').value,secret:f('secret').value,enabled:f('enabled').checked,expires_at:f('expires_at').value?Math.floor(new Date(f('expires_at').value).getTime()/1000):0,quota_bytes:Math.round(Number(f('quota_gb').value)*1073741824)};});
- await api(editing?`/api/nodes/${editing}`:'/api/nodes',editing?'PUT':'POST',n);$('node-dialog').close();toast('配置校验通过，已提交到独立 Xray 服务');await refresh();
+ await api(editing?`/api/nodes/${editing}`:'/api/nodes',editing?'PUT':'POST',n);$('node-dialog').close();toast('配置校验通过，已提交到独立代理服务');await refresh();
  }catch(error){$('node-error').textContent=error.message;}finally{button.disabled=false;}});
 $('settings-form').addEventListener('submit',e=>{e.preventDefault();attempt(async()=>{const f=e.target.elements;await api('/api/settings','POST',{public_address:f.public_address.value.trim(),ipv4_only:f.ipv4_only.checked,block_private:f.block_private.checked,loglevel:f.loglevel.value});toast('设置已保存');await refresh();});});
 async function openShare(n,c){const r=await api(`/api/share/${n}/${c}`);$('share-text').value=r.link;$('share-qr').src=`/api/qr/${n}/${c}`;$('share-dialog').showModal();}
@@ -100,6 +100,6 @@ $('backup').onclick=()=>attempt(async()=>{const r=await fetch('/api/backup',{cre
 $('restore').onclick=()=>$('restore-file').click();
 $('restore-file').onchange=()=>attempt(async()=>{const file=$('restore-file').files[0];$('restore-file').value='';if(!file)return;if(file.size>32*1024*1024)throw Error('备份不能超过 32 MiB');if(!confirm('恢复将替换本面板的入站、用户、设置和累计流量。继续？'))return;await api('/api/restore','POST',JSON.parse(await file.text()));toast('备份已恢复');await refresh();});
 $('rollback').onclick=()=>attempt(async()=>{if(confirm('回退到上一次保存配置前的状态？')){await api('/api/rollback','POST');toast('已回退');await refresh();}});
-$('restart-core').onclick=()=>attempt(async()=>{if(confirm('重启 Xray 会短暂中断节点连接。继续？')){await api('/api/restart-core','POST');toast('已请求重启');setTimeout(()=>attempt(refresh),2000);}});
+$('restart-core').onclick=()=>attempt(async()=>{if(confirm('重启代理核心 会短暂中断节点连接。继续？')){await api('/api/restart-core','POST');toast('已请求重启');setTimeout(()=>attempt(refresh),2000);}});
 (async()=>{try{const r=await api('/api/session');csrf=r.csrf;showWorkspace(r.username);await refresh();}catch{showLogin();}})();
 setInterval(()=>{if(!document.hidden&&!$('workspace').hidden&&!$('node-dialog').open)attempt(refresh);},15000);

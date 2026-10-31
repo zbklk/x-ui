@@ -72,10 +72,22 @@ id personal-acme >/dev/null 2>&1 || useradd --system --gid personal-acme --home-
 id personal-site >/dev/null 2>&1 || useradd --system --gid personal-panel --home-dir /nonexistent --shell /usr/sbin/nologin personal-site
 install -d -m 755 /opt/personal-panel
 install -d -m 700 /etc/personal-panel
-install -d -m 700 -o personal-panel -g personal-panel /var/lib/personal-panel /var/lib/personal-xray
+install -d -m 700 -o personal-panel -g personal-panel /var/lib/personal-panel /var/lib/personal-xray /var/lib/personal-core
 install -d -m 700 -o personal-acme -g personal-acme /var/lib/personal-acme
 install -d -m 2750 -o personal-acme -g personal-panel /var/lib/personal-panel-tls
 
+panel_was_active=0
+if systemctl is-active --quiet personal-panel.service; then panel_was_active=1; fi
+recover_install() {
+  install_error=$?
+  if [[ "$panel_was_active" == 1 ]]; then
+    systemctl restart personal-panel.service 2>/dev/null || true
+    systemctl start personal-panel-maintain.timer 2>/dev/null || true
+  fi
+  printf '%s\n' '安装未完成，已尝试恢复原面板与维护任务；请根据上方错误检查。'
+  return "$install_error"
+}
+trap recover_install ERR
 systemctl stop personal-panel.service personal-panel-maintain.timer personal-panel-maintain.service 2>/dev/null || true
 if [[ -f /var/lib/personal-panel/panel.sqlite3 ]]; then
   install -d -m 700 /var/backups/personal-panel
@@ -91,7 +103,7 @@ for old in sorted(folder.glob('before-install-*.sqlite3'))[:-7]:
     old.unlink()
 PY
 fi
-for file in app.py core.py access.py ownsite.py site_server.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json; do
+for file in app.py core.py singbox.py stats_rpc.py core_deploy.py access.py ownsite.py site_server.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json singbox-source.json; do
   install -m 644 "$source_dir/$file" "/opt/personal-panel/$file"
 done
 for directory in templates static deploy site; do
@@ -112,21 +124,23 @@ PANEL_ALLOWED_HOSTS=localhost,127.0.0.1,[::1]
 PANEL_ALLOWED_CLIENTS=0.0.0.0/0,::/0
 PANEL_TLS=off
 PANEL_STATS_PORT=18387
+PANEL_CORE_ENGINE=sing-box
+PANEL_CORE_BINARY=/opt/personal-panel/core/sing-box
+PANEL_CONFIG_DIR=/var/lib/personal-core
 ENV
   chmod 600 /etc/personal-panel/panel.env
 fi
 
-# Keep an existing tested core on application upgrades; core updates are explicit.
-if [[ ! -x /opt/personal-panel/core/xray ]]; then
-  /opt/personal-panel/venv/bin/python /opt/personal-panel/manage.py core install
-fi
 /opt/personal-panel/venv/bin/python /opt/personal-panel/manage.py install-acme
 install -m 755 /opt/personal-panel/deploy/panelctl /usr/local/bin/panelctl
 install -m 644 /opt/personal-panel/deploy/personal-*.service /opt/personal-panel/deploy/personal-*.timer /opt/personal-panel/deploy/personal-*.path /etc/systemd/system/
 systemctl daemon-reload
+# Validate all saved nodes before stopping Xray. Restore the original runtime if
+# sing-box fails to start or its per-user statistics API is unavailable.
+panelctl core migrate
 # The manager reads the root-only env file and passes it to the unprivileged job.
 systemctl start personal-panel-maintain.service
-systemctl enable --now personal-xray.service personal-xray.path personal-cert.path personal-panel-maintain.timer
+systemctl enable --now personal-core.service personal-core.path personal-cert.path personal-panel-maintain.timer
 if [[ -t 0 ]]; then
   has_admin=$(python3 -c 'import sqlite3; d=sqlite3.connect("/var/lib/personal-panel/panel.sqlite3");print(d.execute("SELECT count(*) FROM admin").fetchone()[0])')
   if [[ "$has_admin" == 0 ]]; then
@@ -137,7 +151,7 @@ fi
 # Existing administrator, nodes, accounting and TLS settings remain in place.
 panelctl access "$install_access" --port "$selected_port" --no-restart
 systemctl enable --now personal-panel.service
-systemctl is-active --quiet personal-panel.service personal-xray.service
+systemctl is-active --quiet personal-panel.service personal-core.service
 panelctl access check
 # An existing owned site keeps its domain and certificate during upgrades.
 site_domain=${PANEL_SITE_DOMAIN:-$(python3 - <<'PY'
@@ -162,7 +176,7 @@ if [[ -n "$site_domain" ]]; then
 fi
 cat <<'MSG'
 
-Personal Panel 0.3.1 已安装。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
+Personal Panel 0.4.0 已安装，代理核心为 sing-box。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
 如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin

@@ -332,11 +332,13 @@ def cert_deployed():
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert / "fullchain.pem", cert / "key.pem")
     # A renewal is not complete until the services actually load the installed pair.
-    config = Path("/var/lib/personal-xray/config.json")
-    if config.exists() and '"certificateFile"' in config.read_text():
+    values = env_values(PANEL_ENV)
+    folder = values.get("PANEL_CONFIG_DIR", values.get("PANEL_XRAY_DIR", "/var/lib/personal-xray"))
+    config = Path(folder) / "config.json"
+    if config.exists() and any(key in config.read_text() for key in ('"certificateFile"', '"certificate_path"')):
         atomic_write(config.parent / "reload.trigger", str(time.time_ns()))
         os.chown(config.parent / "reload.trigger", pwd.getpwnam("personal-panel").pw_uid, pwd.getpwnam("personal-panel").pw_gid)
-    if env_values(PANEL_ENV).get("PANEL_TLS") == "on":
+    if values.get("PANEL_TLS") == "on":
         service("reload", "personal-panel.service")
     from ownsite import SITE_ENV
     if SITE_ENV.exists():
@@ -386,6 +388,7 @@ def main():
     commands.add_parser("status")
     commands.add_parser("install-acme")
     commands.add_parser("cert-deployed")
+    commands.add_parser("check-core-config", help=argparse.SUPPRESS)
     p = commands.add_parser("access", help="设置公网 / 私有访问、管理端口或查看访问地址")
     p.add_argument("mode", choices=("public", "private", "show", "check"))
     p.add_argument("--port", type=int)
@@ -406,15 +409,22 @@ def main():
     p.add_argument("--port", type=int, help="网站端口；默认自动选择 443 / 8443 / 9443")
     p.add_argument("--panel-https", action="store_true", help="小站验证成功后，面板共用证书并输出域名 HTTPS 登录地址")
     p = commands.add_parser("core")
-    p.add_argument("action", choices=("install", "update", "rollback"))
+    p.add_argument("action", choices=("install", "update", "rollback", "migrate"))
     args = parser.parse_args()
     try:
-        if args.command in ("admin", "maintain", "status"):
+        if args.command in ("admin", "maintain", "status", "check-core-config"):
             unprivileged_cli()
         if args.command == "admin":
             admin(args)
         elif args.command == "core":
-            core_rollback() if args.action == "rollback" else core_install(args)
+            if args.action == "migrate":
+                import core_deploy
+                core_deploy.migrate(sys.modules[__name__])
+            elif env_values(PANEL_ENV).get("PANEL_CORE_ENGINE") == "sing-box":
+                import core_deploy
+                core_deploy.rollback(sys.modules[__name__]) if args.action == "rollback" else core_deploy.install(args, sys.modules[__name__])
+            else:
+                core_rollback() if args.action == "rollback" else core_install(args)
         elif args.command == "install-acme":
             install_acme()
         elif args.command == "cert":
@@ -428,6 +438,9 @@ def main():
             configure_access(args)
         elif args.command == "maintain":
             Core().maintain()
+        elif args.command == "check-core-config":
+            core = Core()
+            core.validate_config(json.loads((core.config_dir / "config.json").read_text()))
         elif args.command == "status":
             print(json.dumps(Core().status(), ensure_ascii=False, indent=2))
     except PanelError as e:

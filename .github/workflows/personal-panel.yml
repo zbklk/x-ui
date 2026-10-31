@@ -62,3 +62,6 @@ jobs:
       - name: Authentication, recovery, renewal and real protocol tests
         working-directory: personal-panel
         run: python -m unittest discover -s tests -v
+      - name: Real systemd migration and failed-start recovery
+        if: matrix.python == '3.12'
+        run: sudo env GITHUB_ACTIONS=true bash personal-panel/tests/systemd_migration.sh "$XRAY_TEST_BINARY" "$(command -v python)"

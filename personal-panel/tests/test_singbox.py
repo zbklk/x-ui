@@ -204,6 +204,8 @@ class SingboxIntegrationTests(unittest.TestCase):
         self.core.validate_config(config)
         server = self.start(config, "server")
         wait_port(self.core.stats_port, server)
+        from ownsite import health
+        health("example.com", nodes[-1]["port"], cafile=str(self.root / "fullchain.pem"))
         for n in nodes:
             for index, user in enumerate(n["clients"]):
                 with self.subTest(protocol=n["protocol"], user=index):

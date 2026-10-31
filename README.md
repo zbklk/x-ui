@@ -1,8 +1,8 @@
-# Personal Panel · 自用 Xray 面板
+# Personal Panel · 自用 sing-box 面板
 
-独立实现的私人节点管理面板，当前版本 **0.3.1**。
+独立实现的私人节点管理面板，当前版本 **0.4.0**。
 
-默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与官方 Xray 核心，前端无需外部 CDN。
+默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与 sing-box 官方源码统计构建，前端无需外部 CDN。
 
 **这不是旧 x-ui 的完整升级版，不使用闭源发布包。** 原有 Go 代码与 `install.sh` 保留，旧说明见 [README.legacy.md](README.legacy.md)。新代码位于 [personal-panel/](personal-panel/)。
 
@@ -39,6 +39,14 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 0.2.0 以后通过 `panelctl access private` 明确选择的私有模式，会在下次升级中保留。
 
+### 0.3.x 升级到 sing-box
+
+再次运行同一条安装命令即可：自动安装 **sing-box 1.14.4**，读取现有节点生成新核心配置，校验成功后才停止本面板的 Xray 服务并切换。管理员、节点、UUID / 密钥、端口、累计流量、备份、HTTPS 面板与证书续签设置保留，原分享链接可继续使用。
+
+切换时节点连接会短暂中断。新核心或逐用户统计 API 启动检查失败时，自动恢复原核心及访问设置。原 Xray 二进制和配置留作恢复依据，不卸载原来的独立旧 x-ui。
+
+切换用于避开新版 Xray 的部分 REALITY ClientHello 兼容限制。已验证不包含 ML-KEM 的客户端指纹可进行 REALITY Vision HTTPS 传输；仍需在实际手机和网络上验收 Shadowrocket 2.2.92，不能把模拟握手测试当成手机实测。
+
 ### 查看地址或修改端口
 
 在 VPS 执行：
@@ -61,11 +69,11 @@ panelctl access public --port 55443
 | 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；支持公网 HTTP 下生成 UUID 及复制链接 |
 | 管理访问 | 安装填写域名后自动 HTTPS 域名 + 端口；跳过域名可用公网 IP + 端口；支持来源限制及私有模式 |
 | 出站 | 默认仅 IPv4；可切换双栈；默认阻止访问本机及内网 |
-| 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和 Xray 配置后写入；独立服务加载 |
+| 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和核心配置后写入；独立服务加载 |
 | 证书 | 单个域名、Cloudflare 指定 Zone 的 Token、DNS-01、自动续签与加载钩子 |
 | 自有网站 | 可选独立静态 HTTPS 小站、TLS 1.3 / HTTP/2、自有域名 REALITY 默认值、端口冲突与循环检查 |
 | 恢复 | JSON 导出 / 恢复、上次配置回退、每日备份保留最近 7 份 |
-| 核心 | 固定初装版本、官方发布包 SHA-256 校验、更新前校验配置、失败恢复及二进制回滚 |
+| 核心 | 固定官方源码版本、统计构建 SHA-256 校验、更新前校验配置、失败恢复及二进制回滚 |
 
 REALITY 可使用安装器创建的自有小站，或自行选择并验证其他 TLS 目标。REALITY 入站本身和 SS2022 无需证书；自有 HTTPS 目标网站及 TLS 协议需要证书。自有目标更便于维护，但不保证在所有网络下比第三方目标更合适。
 
@@ -75,7 +83,7 @@ REALITY 可使用安装器创建的自有小站，或自行选择并验证其他
 
 域名的 A 记录指向本机 IPv4；如果添加 AAAA，也需指向本机可用 IPv6。**Cloudflare 记录使用 DNS only（灰云）**，让节点直接连接 VPS。按下一节创建只授权该 Zone 的 API Token，准备好 Zone ID。
 
-新装或升级时输入该域名即可。也可以在升级到 0.3.1 后单独执行：
+新装或升级时输入该域名即可。也可以在升级到当前版本后单独执行：
 
 ```bash
 sudo panelctl site www.example.com --panel-https
@@ -121,7 +129,7 @@ sudo panelctl cert panel.example.com
 
 专用 `personal-acme` 用户运行固定上游提交的 acme.sh，每日 timer 检查是否续签。完整证书及私钥安装后，校验配对，再通知服务加载。凭据不会经过网页，网页用户不能读取 Token；不自动升级执行 ACME 上游代码。
 
-续签后，已启用的小站自动重启加载新证书；面板 HTTPS 和使用证书的 Xray 入站也收到加载通知。同域名重复运行 `cert` / `site` 会复用凭据；更换 Token 使用 `sudo panelctl cert 你的域名 --replace-token`，按提示重新输入，不放入命令参数。
+续签后，已启用的小站自动重启加载新证书；面板 HTTPS 和使用证书的 sing-box 入站也收到加载通知。同域名重复运行 `cert` / `site` 会复用凭据；更换 Token 使用 `sudo panelctl cert 你的域名 --replace-token`，按提示重新输入，不放入命令参数。
 
 ```bash
 systemctl list-timers personal-acme.timer
@@ -175,31 +183,40 @@ sudo panelctl access public --port 54322
 sudo panelctl core update
 sudo panelctl core rollback
 sudo systemctl restart personal-panel.service
-sudo journalctl -u personal-xray.service -n 60 --no-pager
+sudo journalctl -u personal-core.service -n 60 --no-pager
 sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 ```
 
-核心更新是手动操作：下载官方 Latest 并校验 SHA-256，以普通用户测试现有配置，再替换核心；服务启动失败会恢复前一二进制。配置更改或核心重启会短暂中断节点连接，仅重启面板不主动重启核心。
+核心更新是手动操作：`panelctl core update` 安装当前面板清单固定的 sing-box 统计构建，校验 SHA-256、源码清单及现有配置，再替换核心；服务启动或统计 API 检查失败会恢复前一二进制。要获取更新的固定版本，先重新运行面板安装命令，再执行核心更新；不会直接换成缺少统计模块的上游默认包。配置更改或核心重启会短暂中断节点连接，仅重启面板不主动重启核心。
 
-再次运行新安装脚本可更新面板，短暂停止面板及统计任务，保留现有核心。更新前 SQLite 备份至 `/var/backups/personal-panel/`，保留最近 7 份。
+再次运行新安装脚本可更新面板，短暂停止面板及统计任务。0.3.x 的 Xray 实例自动迁移到 sing-box；已经使用 sing-box 的实例保留现有核心，升级核心需显式运行更新命令。更新前 SQLite 备份至 `/var/backups/personal-panel/`，保留最近 7 份。
 
 网页支持下载、恢复 JSON 备份及回退上次状态。备份包含节点私钥、用户凭据与流量，不含管理员密码、Cloudflare Token 或证书私钥。自动备份位于 `/var/lib/personal-panel/auto-backups/`，每天 UTC 日期一份、保留最近 7 份；离机保存请自行加密。
 
 旧 x-ui 数据库不能直接导入：用不同端口并行测试，手动迁移需要的节点，再自行停用旧服务。不要把旧 `x-ui.db` 覆盖到新数据库。
+
+## 内核来源与逐用户统计
+
+默认使用 **sing-box 1.14.4**。为了保留流量统计及用户额度，内核由本仓库公开的 [GitHub Actions](.github/workflows/sing-box-core.yml) 从 **未修改的 SagerNet/sing-box 官方源码**构建，开启官方 `with_utls,with_v2ray_api` 编译标签；这不是上游的默认发布包，也没有修改协议或加入第三方补丁。
+
+- 源码提交、Go 版本及编译标签：[singbox-source.json](personal-panel/singbox-source.json)。
+- amd64 / arm64 构建、源码描述与许可证：[发布包](https://github.com/zbklk/x-ui/releases/tag/personal-sing-box-v1.14.4-1)。VPS 下载预先构建好的包，不在 VPS 编译。
+- 下载地址与 SHA-256 固定在 [upstream.json](personal-panel/upstream.json)。安装还检查包内源码清单和统计模块，拒绝缺少逐用户统计的内核。
+- 统计 API 只监听 `127.0.0.1:18387`。面板直接读取累计计数，不依赖 Xray 程序，也不开放到公网。重启代次及累计流量继续保存在原 SQLite 数据库。
 
 ## 服务与权限
 
 | 服务 / 路径 | 用途 |
 | --- | --- |
 | `personal-panel.service` | 普通用户网页进程，无 sudo、root 或 Linux capabilities |
-| `personal-xray.service` | 独立普通用户核心，仅授予绑定低端口的能力 |
+| `personal-core.service` | 独立普通用户 sing-box 核心，仅授予绑定低端口的能力 |
 | `personal-site.service` | 独立 personal-site 用户，只读静态网站，仅授予绑定低端口的能力；不能读取面板数据库或 DNS Token |
 | `personal-panel-maintain.timer` | 约每 15 秒采集流量、检查额度及到期 |
-| `personal-xray.path` | 固定服务处理配置加载请求，不提供任意命令接口 |
+| `personal-core.path` | 固定服务处理配置加载请求，不提供任意命令接口 |
 | `personal-acme.timer` / `personal-cert.path` | 独立续签；完整部署后通知服务加载 |
 | `/opt/personal-panel` | root 拥有的代码、虚拟环境和核心 |
 | `/var/lib/personal-panel` | 普通用户独占的数据库、备份及审计 |
-| `/var/lib/personal-xray` | 配置与上次配置，目录权限 0700 |
+| `/var/lib/personal-core` | sing-box 配置与上次配置，目录权限 0700 |
 | `/etc/personal-panel/cloudflare.env` | root:root 0600；systemd 只传给证书服务 |
 | `/var/lib/personal-acme` | ACME 用户独占的账户、Token 缓存和签发状态 |
 | `/var/lib/personal-panel-tls` | 证书用户可写、面板用户只读；私钥 0640 |
@@ -212,7 +229,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 - 额度不是实时计费边界，约 15 秒检查一次，可能超额；异常重启前尚未采集的尾部流量可能丢失，不用于对外计费。
 - `::` 在部分系统上接受双栈；严格仅 IPv6 入站需配合防火墙。网页进程不能完整试绑低于 1024 的端口；端口检查与实际绑定间也存在竞争窗口，请确认核心状态。
 - 未来核心可能移除协议，更新前保留备份。初装固定版本见 `personal-panel/upstream.json`。
-- 已验证认证、CSRF、IP 白名单、恢复、额度、续签流程模拟与更新失败恢复；固定官方核心通过五种协议配置及本机真实传输 / 统计测试，包含 REALITY Vision 连接自有 HTTPS 目标及普通浏览器回落；小站验证 TLS 1.3、HTTP/2 与证书域名检查。
+- 已验证认证、CSRF、IP 白名单、备份恢复、额度、续签流程模拟、迁移及更新失败恢复；sing-box 通过五种协议多用户真实传输 / 统计测试，包含 REALITY Vision 的真实 HTTPS、非 ML-KEM 指纹和 sing-box 客户端连接，以及域名解析到内网地址后的访问阻断。小站验证 TLS 1.3、HTTP/2 与证书域名。
 - 新版本还应在实际 VPS 验收公网访问及 systemd 生命周期，并用自己的域名 / Token 完成真实 ACME 签发。本地测试不等于第三方安全审计。
 
 ## 本地测试
@@ -222,8 +239,8 @@ cd personal-panel
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m unittest discover -s tests -v
-# 对 upstream.json 指定的核心下载并校验后，开启集成测试：
-XRAY_TEST_BINARY=/absolute/path/to/xray .venv/bin/python -m unittest discover -s tests -v
+# 对 upstream.json 指定的统计版 sing-box 和 Xray 测试客户端下载并校验后：
+SINGBOX_TEST_BINARY=/absolute/path/to/sing-box XRAY_TEST_BINARY=/absolute/path/to/xray .venv/bin/python -m unittest discover -s tests -v
 ```
 
 原项目与本仓库代码遵循根目录 [GPL-3.0 LICENSE](LICENSE)。

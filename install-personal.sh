@@ -2,6 +2,9 @@
 # Separate installation entry. Does not stop, remove or migrate legacy x-ui.
 set -euo pipefail
 umask 022
+# Minimal VPS/SSH environments may force ASCII despite a recent Python. Keep
+# this process and its children UTF-8 without changing the system locale.
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 [[ $EUID == 0 ]] || { echo '请使用 sudo bash install-personal.sh'; exit 1; }
 [[ -d /run/systemd/system ]] || { echo '需要运行 systemd 的 Debian / Ubuntu 服务器'; exit 1; }
 command -v apt-get >/dev/null || { echo '目前仅支持 Debian / Ubuntu'; exit 1; }

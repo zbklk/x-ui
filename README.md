@@ -33,6 +33,8 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 安装会尝试放行已启用的 UFW 中对应的管理 TCP 端口，不启用 UFW，也不改动 SSH 放行规则。**如启用了云平台安全组、云防火墙或其他主机防火墙，还需放行所选管理端口的 TCP。**统计端口 18387 始终只供本机使用，无需开放。
 
+安装器和 `panelctl` 自动使用 UTF-8，兼容 Debian 12 等精简系统及 SSH 会话中继承的 ASCII 编码设置，无需修改系统 locale。旧版若在依赖安装后提示 `UnicodeEncodeError`，重新执行上方安装命令获取修复即可；`Ignoring ... markers` 和 `Requirement already satisfied` 是正常依赖提示。
+
 ### 已有面板升级
 
 再次执行上方同一条安装命令即可。原来的管理员、密码、节点、流量与证书保留；旧版仅本机访问的配置会自动切换为公网直连。若希望继续使用默认端口，端口提示直接回车即可，无需卸载重装。

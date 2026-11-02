@@ -74,7 +74,7 @@ def core_install(args):
     if not arch:
         raise PanelError("目前只支持 Linux amd64 / arm64")
     if args.action == "install":
-        metadata = json.loads((ROOT / "upstream.json").read_text())["xray"]
+        metadata = json.loads((ROOT / "upstream.json").read_text(encoding="utf-8"))["xray"]
     else:
         metadata = json.loads(download("https://api.github.com/repos/XTLS/Xray-core/releases/latest", 2 * 1024 * 1024))
     asset = next((a for a in metadata["assets"] if a["name"] == arch), None)
@@ -134,7 +134,7 @@ def core_rollback():
 
 def install_acme():
     root_only()
-    metadata = json.loads((ROOT / "upstream.json").read_text())["acme"]
+    metadata = json.loads((ROOT / "upstream.json").read_text(encoding="utf-8"))["acme"]
     folder = INSTALL / "acme"
     for item in metadata["files"]:
         content = download(f"https://raw.githubusercontent.com/acmesh-official/acme.sh/{metadata['commit']}/{item['path']}", 2 * 1024 * 1024)
@@ -148,7 +148,7 @@ def env_values(path):
     if not path.exists():
         return {}
     values = {}
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
             values[k] = v
@@ -380,6 +380,12 @@ def unprivileged_cli():
 
 
 def main():
+    # Also cover direct systemd/Python invocations and inherited ASCII stdio.
+    # Set child interpreter defaults before migration or other subprocesses.
+    os.environ.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Personal Panel 本机管理工具")
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("admin", help="创建或重设管理员，不在命令行传递密码")

@@ -6,6 +6,7 @@ set -euo pipefail
 source_dir=$(cd "$(dirname "$0")/.." && pwd)
 xray_test=$1
 python_test=$2
+legacy_singbox=$3
 cleanup() {
   systemctl disable --now personal-panel.service personal-core.service personal-core.path personal-xray.service personal-xray.path personal-site.service 2>/dev/null || true
 }
@@ -164,4 +165,72 @@ for attempt in range(40):
 else:
  raise AssertionError('Certificate deployment did not reload the core and website')
 print('Certificate deployment hook reloaded sing-box, the HTTPS panel and website')
+PY
+
+# Recreate the core capability of a 0.4.0 instance while retaining the live
+# database, administrator, HTTPS service, node ports and certificate files.
+install -m 755 "$legacy_singbox" /opt/personal-panel/core/legacy-test-candidate
+mv -f /opt/personal-panel/core/legacy-test-candidate /opt/personal-panel/core/sing-box
+systemctl restart personal-core.service
+venv/bin/python - <<'PY'
+import http.client,json,socket,sqlite3,ssl,subprocess,time,uuid
+from pathlib import Path
+from unittest.mock import patch
+import core_deploy,manage
+from core import PanelError
+from stats_rpc import query_stats
+active=Path('/opt/personal-panel/core/sing-box')
+assert 'with_quic' not in subprocess.check_output([str(active),'version'],text=True)
+core_deploy.wait_runtime(manage,18387)
+def snapshot():
+ with sqlite3.connect('/var/lib/personal-panel/panel.sqlite3') as db:
+  return db.execute('SELECT body FROM state').fetchall(),db.execute('SELECT * FROM usage ORDER BY client_id').fetchall(),db.execute('SELECT * FROM admin').fetchall()
+before=snapshot()
+old=active.read_bytes()
+fake=active.with_name('failing-quic-candidate')
+fake.write_text('#!/bin/sh\ncase "$1" in\nversion) echo "Tags: with_quic,with_utls,with_v2ray_api";;\ncheck) exit 0;;\n*) exit 1;;\nesac\n')
+fake.chmod(0o755)
+with patch.object(core_deploy,'fetch_candidate',return_value=(fake,{'version':'test'})):
+ try:
+  core_deploy.migrate(manage)
+ except PanelError:
+  pass
+ else:
+  raise AssertionError('Failed QUIC core unexpectedly passed the runtime check')
+assert active.read_bytes()==old
+core_deploy.wait_runtime(manage,18387)
+assert snapshot()==before
+core_deploy.migrate(manage)
+assert 'with_quic' in subprocess.check_output([str(active),'version'],text=True)
+assert snapshot()==before
+query_stats(18387)
+
+# The running unprivileged panel must be able to validate the HY2 config and
+# ask its fixed service to bind a UDP listener under the normal restrictions.
+context=ssl.create_default_context(cafile='/var/lib/personal-panel-tls/fullchain.pem')
+conn=http.client.HTTPSConnection('example.com',55444,context=context,timeout=5)
+conn._create_connection=lambda address,timeout,source_address=None:socket.create_connection(('127.0.0.1',55444),timeout)
+conn.request('POST','/api/login',json.dumps({'username':'existing-admin','password':'existing-admin-password'}),headers={'Content-Type':'application/json'})
+response=conn.getresponse();body=json.loads(response.read());assert response.status==200
+cookie=response.getheader('Set-Cookie').split(';')[0]
+client={'id':str(uuid.uuid4()),'name':'HY2 user','secret':'hysteria-systemd-test-password','enabled':True,'expires_at':0,'quota_bytes':0}
+node={'id':str(uuid.uuid4()),'name':'HY2 systemd test','protocol':'hysteria2','listen':'127.0.0.1','port':25444,'address':'example.com','sni':'example.com','enabled':True,'clients':[client]}
+pid=subprocess.check_output(['systemctl','show','personal-core.service','--property=MainPID','--value'],text=True).strip()
+conn.request('POST','/api/nodes',json.dumps(node),headers={'Content-Type':'application/json','Cookie':cookie,'X-CSRF-Token':body['csrf']})
+response=conn.getresponse();result=response.read();assert response.status==200,result
+for attempt in range(40):
+ try:
+  current=subprocess.check_output(['systemctl','show','personal-core.service','--property=MainPID','--value'],text=True).strip()
+  assert current not in ('0',pid)
+  query_stats(18387,timeout=.5)
+  break
+ except (OSError,ValueError,AssertionError):
+  time.sleep(.2)
+else:
+ raise AssertionError('Managed Hysteria2 inbound failed to reload')
+after=snapshot()
+assert json.loads(after[0][0][0])['nodes'][:-1]==json.loads(before[0][0][0])['nodes']
+assert after[1:]==before[1:]
+conn.close()
+print('Existing sing-box QUIC upgrade, real failed-start rollback and managed Hysteria2 activation preserved old nodes, usage and administrator')
 PY

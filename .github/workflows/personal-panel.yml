@@ -34,7 +34,7 @@ jobs:
       - name: Download and verify pinned sing-box and Xray test client
         run: |
           python - <<'PY'
-          import hashlib,io,json,os,pathlib,urllib.request,zipfile,tarfile
+          import hashlib,io,json,os,pathlib,sys,urllib.request,zipfile,tarfile
           # Pin the cross-core test client independently of legacy installer
           # metadata: the old v26.10.29 download now returns 404 upstream.
           asset={
@@ -62,10 +62,24 @@ jobs:
           binary.chmod(0o755)
           with open(os.environ['GITHUB_ENV'],'a') as env:
               env.write('SINGBOX_TEST_BINARY='+str(binary)+'\n')
+          if sys.version_info[:2] == (3,12):
+              # Existing 0.4.0 installations used this source-described build
+              # without QUIC. Exercise the real capability upgrade as well.
+              url='https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-1/personal-sing-box-1.14.4-linux-amd64.tar.gz'
+              req=urllib.request.Request(url,headers={'User-Agent':'personal-panel-ci'})
+              data=urllib.request.urlopen(req,timeout=60).read()
+              assert hashlib.sha256(data).hexdigest() == 'd199ac3629cc2c48d677db3ec7c00e4112d9e1cd50052ad9a97651c5e85d48f1'
+              binary=pathlib.Path(os.environ['RUNNER_TEMP'])/'personal-legacy-singbox-test'
+              with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as archive:
+                  info=next(m for m in archive.getmembers() if m.isfile() and m.name.endswith('/sing-box'))
+                  binary.write_bytes(archive.extractfile(info).read())
+              binary.chmod(0o755)
+              with open(os.environ['GITHUB_ENV'],'a') as env:
+                  env.write('LEGACY_SINGBOX_TEST_BINARY='+str(binary)+'\n')
           PY
       - name: Authentication, recovery, renewal and real protocol tests
         working-directory: personal-panel
         run: python -m unittest discover -s tests -v
       - name: Real systemd migration and failed-start recovery
         if: matrix.python == '3.12'
-        run: sudo env GITHUB_ACTIONS=true bash personal-panel/tests/systemd_migration.sh "$XRAY_TEST_BINARY" "$(command -v python)"
+        run: sudo env GITHUB_ACTIONS=true bash personal-panel/tests/systemd_migration.sh "$XRAY_TEST_BINARY" "$(command -v python)" "$LEGACY_SINGBOX_TEST_BINARY"

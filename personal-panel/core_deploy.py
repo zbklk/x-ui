@@ -188,6 +188,8 @@ def install(args, ops):
         except (OSError, PanelError, subprocess.SubprocessError):
             if previous.exists():
                 ops.atomic_write(active, previous.read_bytes(), 0o755)
+                # Failed automatic restarts may have hit systemd's rate limit.
+                ops.service("reset-failed", SERVICE, check=False)
                 ops.service("restart", SERVICE, check=False)
             raise PanelError("核心更新启动失败，已恢复前一二进制") from None
         print(f"sing-box {source['version']} 已更新，配置及统计 API 检查通过。")

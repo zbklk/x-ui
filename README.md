@@ -258,7 +258,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 - `::` 在部分系统上接受双栈；严格仅 IPv6 入站需配合防火墙。网页进程不能完整试绑低于 1024 的端口；端口检查与实际绑定间也存在竞争窗口，请确认核心状态。
 - 未来核心可能移除协议，更新前保留备份。初装固定版本见 `personal-panel/upstream.json`。
 - 测试覆盖认证、CSRF、IP 白名单、备份恢复、额度、续签流程模拟、迁移及更新失败恢复；sing-box 的六种协议多用户传输 / 统计测试包含 Hysteria2 的 TCP / UDP 转发、Salamander、错误密码拒绝，以及 REALITY Vision 的真实 HTTPS、非 ML-KEM 指纹和域名解析到内网地址后的访问阻断。小站验证 TLS 1.3、HTTP/2 与证书域名。
-- [GitHub Actions 验证记录](https://github.com/zbklk/x-ui/actions/runs/41181250619)：Python 3.10 / 3.12 测试通过；真实 systemd 环境覆盖旧核心迁移、启动失败恢复、原账号 HTTPS 登录、统计读取、配置加载及证书部署后的服务加载。
+- [GitHub Actions 验证记录](https://github.com/zbklk/x-ui/actions/runs/41386039743)：Python 3.10 / 3.11 / 3.12 的 78 项测试通过；真实 systemd 环境覆盖旧核心迁移、旧 sing-box 自动补齐 QUIC、启动失败恢复、原账号 HTTPS 登录、Hysteria2 入站加载、统计读取及证书部署后的服务加载。
 - 首次安装仍需在自己的 VPS 确认公网访问，并用自己的域名 / Token 完成真实 ACME 签发。自动化测试中的续签流程模拟不等于真实 CA 签发，也不构成第三方安全审计。
 
 ## 本地测试

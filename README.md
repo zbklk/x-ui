@@ -253,7 +253,7 @@ cd personal-panel
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m unittest discover -s tests -v
-# 下载并校验 upstream.json 指定的统计版 sing-box 和测试用 Xray 后：
+# 下载并校验 upstream.json 固定的统计版 sing-box 和测试工作流固定的 Xray 后：
 SINGBOX_TEST_BINARY=/absolute/path/to/sing-box XRAY_TEST_BINARY=/absolute/path/to/xray .venv/bin/python -m unittest discover -s tests -v
 ```
 

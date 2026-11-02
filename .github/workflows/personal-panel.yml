@@ -35,8 +35,12 @@ jobs:
         run: |
           python - <<'PY'
           import hashlib,io,json,os,pathlib,urllib.request,zipfile,tarfile
-          release=json.loads(pathlib.Path('personal-panel/upstream.json').read_text())['xray']
-          asset=next(a for a in release['assets'] if a['name']=='Xray-linux-64.zip')
+          # Pin the cross-core test client independently of legacy installer
+          # metadata: the old v26.10.29 download now returns 404 upstream.
+          asset={
+              'browser_download_url':'https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip',
+              'digest':'sha256:e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214',
+          }
           req=urllib.request.Request(asset['browser_download_url'],headers={'User-Agent':'personal-panel-ci'})
           data=urllib.request.urlopen(req,timeout=60).read()
           assert hashlib.sha256(data).hexdigest() == asset['digest'].split(':')[1]

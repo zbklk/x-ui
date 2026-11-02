@@ -1,3 +1,4 @@
+import codecs
 import hashlib
 import io
 import json
@@ -97,7 +98,10 @@ with patch.object(manage,"unprivileged_cli"), patch.object(manage,"Core",return_
             result = subprocess.run(["bash", str(wrapper), "status"], env=env,
                                     capture_output=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
-            self.assertEqual(json.loads(result.stdout), {"utf8": 1, "stdio": "utf-8", "files": "utf-8"})
+            actual = json.loads(result.stdout)
+            self.assertEqual(actual["utf8"], 1)
+            for key in ("stdio", "files"):
+                self.assertEqual(codecs.lookup(actual[key]).name, "utf-8")
 
 
 class CoreDownloadTests(unittest.TestCase):

@@ -18,7 +18,7 @@ def node(protocol="vless-reality", port=20000):
     key = base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("=")
     c = {"id": str(uuid.uuid4()), "name": "测试用户", "secret": str(uuid.uuid4()), "enabled": True,
          "expires_at": 0, "quota_bytes": 0}
-    if protocol == "trojan-tls":
+    if protocol in ("trojan-tls", "hysteria2"):
         c["secret"] = "a-long-random-password-for-test"
     if protocol == "shadowsocks2022":
         c["secret"] = base64.b64encode(b"user-secret-1234").decode()

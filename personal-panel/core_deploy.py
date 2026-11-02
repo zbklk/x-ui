@@ -57,10 +57,12 @@ def fetch_candidate(ops):
     return candidate, source
 
 
-def check_candidate(candidate, config):
+def check_candidate(candidate, config, require_quic=False):
     result = subprocess.run([str(candidate), "version"], capture_output=True, text=True, timeout=10, check=True, **permissions())
     if not all(tag in result.stdout for tag in ("with_utls", "with_v2ray_api")):
         raise PanelError("sing-box 缺少 REALITY 或逐用户统计模块，拒绝替换")
+    if require_quic and "with_quic" not in result.stdout:
+        raise PanelError("sing-box 缺少 Hysteria2 所需的 QUIC 模块，拒绝替换")
     result = subprocess.run([str(candidate), "check", "-c", str(config)], capture_output=True, timeout=15, **permissions())
     if result.returncode:
         raise PanelError("sing-box 无法通过现有节点配置校验；原核心未改动")
@@ -108,6 +110,14 @@ def migrate(ops):
         raise PanelError("请先运行安装脚本")
     active_binary = ops.INSTALL / "core/sing-box"
     if values.get("PANEL_CORE_ENGINE") == "sing-box" and active_binary.exists():
+        version = subprocess.run([str(active_binary), "version"], capture_output=True, text=True,
+                                 timeout=10, check=True, **permissions()).stdout
+        if "with_quic" not in version:
+            # Capability upgrade only: existing QUIC-capable cores are kept.
+            # install() validates existing config and restores the old binary
+            # if the new service or its per-user statistics fails to start.
+            install(None, ops)
+            print("已为现有 sing-box 启用 Hysteria2 / QUIC，原节点与账号保留。")
         ops.service("enable", "--now", SERVICE, "personal-core.path")
         wait_runtime(ops, int(values.get("PANEL_STATS_PORT", "18387")))
         print("已使用 sing-box，账号、节点及统计保留。核心版本更新使用 panelctl core update。")
@@ -120,7 +130,7 @@ def migrate(ops):
         content = compile_snapshot(ops, values, candidate)
         ops.atomic_write(staging, content)
         panel_owned(staging)
-        check_candidate(candidate, staging)
+        check_candidate(candidate, staging, require_quic=True)
         original_env = ops.PANEL_ENV.read_bytes()
         config = CONFIG_DIR / "config.json"
         previous_config = config.read_bytes() if config.exists() else None
@@ -168,7 +178,7 @@ def install(args, ops):
     active, previous = ops.INSTALL / "core/sing-box", ops.INSTALL / "core/sing-box.previous"
     config = Path(ops.env_values(ops.PANEL_ENV).get("PANEL_CONFIG_DIR", str(CONFIG_DIR))) / "config.json"
     try:
-        check_candidate(candidate, config)
+        check_candidate(candidate, config, require_quic=True)
         if active.exists():
             ops.atomic_write(previous, active.read_bytes(), 0o755)
         os.replace(candidate, active)

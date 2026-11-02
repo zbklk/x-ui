@@ -1,6 +1,6 @@
 # Personal Panel · 自用 sing-box 面板
 
-独立实现的私人节点管理面板，当前版本 **0.4.0**，默认核心为 **sing-box 1.14.4**（含逐用户统计模块）。
+独立实现的私人节点管理面板，当前版本 **0.5.0**，默认核心为 **sing-box 1.14.4**（含 QUIC / Hysteria2 与逐用户统计模块）。
 
 默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与 sing-box 官方源码统计构建，前端无需外部 CDN。
 
@@ -41,6 +41,21 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 0.2.0 以后通过 `panelctl access private` 明确选择的私有模式，会在下次升级中保留。
 
+### 0.4.x 升级并增加 Hysteria2
+
+执行上方同一条安装命令即可升级到 0.5.0。安装器会检查现有 sing-box；缺少 QUIC 时自动安装含 `with_quic,with_utls,with_v2ray_api` 的固定构建，校验原配置及统计 API。更新失败会恢复原核心二进制。已支持 QUIC 的核心保持原版本。
+
+**已有 VLESS、Trojan、VMess、Shadowsocks 节点及账号、密钥、累计流量和证书保留。** 更新核心会短暂中断连接，原分享链接可继续使用。安装完成后刷新面板，“新建入站”的协议列表即可选择 **Hysteria2 · QUIC · TLS**。
+
+Hysteria2 的填写与使用：
+
+- 先通过安装器或 `sudo panelctl cert 你的域名` 配置证书；已有域名证书和自动续签可直接复用。
+- SNI 填证书覆盖的域名；入站端口另选，例如 `20001`，避开已有节点、管理端口和自有小站端口。
+- 用户密码自动生成，可在同一入站添加多个用户；支持启停、到期、额度、逐用户统计、二维码及备份恢复。
+- Salamander 混淆密码可留空；启用时客户端需与服务端一致，分享链接会携带所需参数。
+- **在主机防火墙和云防火墙放行节点端口的 UDP**，例如 `sudo ufw allow 20001/udp`（使用 UFW 时）。HY2 的代理连接使用 UDP，放行 TCP 不能代替 UDP。
+- 使用支持 Hysteria2 的客户端导入 `hysteria2://` 分享链接；保持正常证书校验。REALITY 目标域名和目标端口不适用于 HY2。
+
 ### 0.3.x 升级到 sing-box
 
 再次运行同一条安装命令即可：自动安装 **sing-box 1.14.4**，读取现有节点生成新核心配置，校验成功后才停止本面板的 Xray 服务并切换。管理员、节点、UUID / 密钥、端口、累计流量、备份、HTTPS 面板与证书续签设置保留，原分享链接可继续使用。
@@ -68,7 +83,7 @@ panelctl access public --port 55443
 
 | 功能 | 当前实现 |
 | --- | --- |
-| 协议 | VLESS REALITY Vision、VLESS WS TLS、VMess WS TLS、Trojan TCP TLS、SS2022 AES-128-GCM |
+| 协议 | VLESS REALITY Vision、VLESS WS TLS、VMess WS TLS、Trojan TCP TLS、SS2022 AES-128-GCM、Hysteria2 |
 | 用户 | 单端口多用户、启停、UUID / 密码、到期时间、累计流量额度 |
 | 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；支持公网 HTTP 下生成 UUID 及复制链接 |
 | 管理访问 | 安装填写域名后自动 HTTPS 域名 + 端口；跳过域名可用公网 IP + 端口；支持来源限制及私有模式 |
@@ -81,7 +96,7 @@ panelctl access public --port 55443
 
 REALITY 可使用安装器创建的自有小站，或自行选择并验证其他 TLS 目标。REALITY 入站本身和 SS2022 无需证书；自有 HTTPS 目标网站及 TLS 协议需要证书。自有目标更便于维护，但不保证在所有网络下比第三方目标更合适。
 
-防火墙需放行面板管理 TCP 端口及实际使用的节点 TCP 端口；SS2022 需要时同时放行该节点 UDP 端口。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
+防火墙需放行面板管理 TCP 端口；VLESS / VMess / Trojan 节点使用 TCP，SS2022 使用 TCP / UDP，Hysteria2 节点使用 UDP。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
 
 ## 可选：自有 HTTPS 网站与 REALITY 目标
 
@@ -200,7 +215,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 
 `panelctl core rollback` 需要此前核心更新留下的备份，只回滚到上一个 sing-box 二进制，不切换回 Xray。网页中的“回退上次配置”恢复节点配置，与核心二进制回滚分别使用。
 
-再次运行新安装脚本可更新面板，短暂停止面板及统计任务。0.3.x 的 Xray 实例自动迁移到 sing-box；已经使用 sing-box 的实例保留现有核心，升级核心需显式运行更新命令。更新前 SQLite 备份至 `/var/backups/personal-panel/`，保留最近 7 份。
+再次运行新安装脚本可更新面板，短暂停止面板及统计任务。0.3.x 的 Xray 实例自动迁移到 sing-box；0.4.x 的 sing-box 若缺少 QUIC，会自动更新到支持 Hysteria2 的固定构建。已支持 QUIC 的实例保留现有核心，其他版本更新需显式运行核心更新命令。更新前 SQLite 备份至 `/var/backups/personal-panel/`，保留最近 7 份。
 
 网页支持下载、恢复 JSON 备份及回退上次状态。备份包含节点私钥、用户凭据与流量，不含管理员密码、Cloudflare Token 或证书私钥。自动备份位于 `/var/lib/personal-panel/auto-backups/`，每天 UTC 日期一份、保留最近 7 份；离机保存请自行加密。
 
@@ -208,10 +223,10 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 
 ## 内核来源与逐用户统计
 
-默认使用 **sing-box 1.14.4**。为了保留流量统计及用户额度，内核由本仓库公开的 [GitHub Actions](.github/workflows/sing-box-core.yml) 从 **未修改的 SagerNet/sing-box 官方源码**构建，开启官方 `with_utls,with_v2ray_api` 编译标签；这不是上游的默认发布包，也没有修改协议或加入第三方补丁。
+默认使用 **sing-box 1.14.4**。为了提供 Hysteria2 并保留流量统计及用户额度，内核由本仓库公开的 [GitHub Actions](.github/workflows/sing-box-core.yml) 从 **未修改的 SagerNet/sing-box 官方源码**构建，开启官方 `with_quic,with_utls,with_v2ray_api` 编译标签；这不是上游的默认发布包，也没有修改协议或加入第三方补丁。
 
 - 源码提交、Go 版本及编译标签：[singbox-source.json](personal-panel/singbox-source.json)。
-- amd64 / arm64 构建、源码描述与许可证：[发布包](https://github.com/zbklk/x-ui/releases/tag/personal-sing-box-v1.14.4-1)。VPS 下载预先构建好的包，不在 VPS 编译。
+- amd64 / arm64 构建、源码描述与许可证：[发布包](https://github.com/zbklk/x-ui/releases/tag/personal-sing-box-v1.14.4-2)。VPS 下载预先构建好的包，不在 VPS 编译。
 - 下载地址与 SHA-256 固定在 [upstream.json](personal-panel/upstream.json)。安装还检查包内源码清单和统计模块，拒绝缺少逐用户统计的内核。
 - 统计 API 只监听 `127.0.0.1:18387`。面板直接读取累计计数，不依赖 Xray 程序，也不开放到公网。重启代次及累计流量继续保存在原 SQLite 数据库。
 
@@ -242,7 +257,7 @@ sudo journalctl -u personal-panel-maintain.service -n 40 --no-pager
 - 额度不是实时计费边界，约 15 秒检查一次，可能超额；异常重启前尚未采集的尾部流量可能丢失，不用于对外计费。
 - `::` 在部分系统上接受双栈；严格仅 IPv6 入站需配合防火墙。网页进程不能完整试绑低于 1024 的端口；端口检查与实际绑定间也存在竞争窗口，请确认核心状态。
 - 未来核心可能移除协议，更新前保留备份。初装固定版本见 `personal-panel/upstream.json`。
-- 已验证认证、CSRF、IP 白名单、备份恢复、额度、续签流程模拟、迁移及更新失败恢复；sing-box 通过五种协议多用户真实传输 / 统计测试，包含 REALITY Vision 的真实 HTTPS、非 ML-KEM 指纹和 sing-box 客户端连接，以及域名解析到内网地址后的访问阻断。小站验证 TLS 1.3、HTTP/2 与证书域名。
+- 测试覆盖认证、CSRF、IP 白名单、备份恢复、额度、续签流程模拟、迁移及更新失败恢复；sing-box 的六种协议多用户传输 / 统计测试包含 Hysteria2 的 TCP / UDP 转发、Salamander、错误密码拒绝，以及 REALITY Vision 的真实 HTTPS、非 ML-KEM 指纹和域名解析到内网地址后的访问阻断。小站验证 TLS 1.3、HTTP/2 与证书域名。
 - [GitHub Actions 验证记录](https://github.com/zbklk/x-ui/actions/runs/41181250619)：Python 3.10 / 3.12 测试通过；真实 systemd 环境覆盖旧核心迁移、启动失败恢复、原账号 HTTPS 登录、统计读取、配置加载及证书部署后的服务加载。
 - 首次安装仍需在自己的 VPS 确认公网访问，并用自己的域名 / Token 完成真实 ACME 签发。自动化测试中的续签流程模拟不等于真实 CA 签发，也不构成第三方安全审计。
 

@@ -57,6 +57,10 @@ def singbox_config(state, usage=None, now=None, stats_port=18387, tls_dir="/var/
         else:
             inbound["tls"] = {"enabled": True, "server_name": node["sni"], "min_version": "1.2",
                               "certificate_path": tls_dir + "/fullchain.pem", "key_path": tls_dir + "/key.pem"}
+            if protocol == "hysteria2":
+                inbound["tls"].update(min_version="1.3", alpn=["h3"])
+                if node.get("obfs_password"):
+                    inbound["obfs"] = {"type": "salamander", "password": node["obfs_password"]}
             if "ws" in node["protocol"]:
                 inbound["transport"] = {"type": "ws", "path": node["path"]}
         config["inbounds"].append(inbound)

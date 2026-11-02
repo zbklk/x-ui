@@ -15,6 +15,46 @@ from core import Core, PanelError
 
 
 class MigrationTests(unittest.TestCase):
+    def test_existing_singbox_gains_quic_without_losing_nodes_and_failed_update_restores_binary(self):
+        for capable, fail in ((True, False), (False, False), (False, True)):
+            with self.subTest(capable=capable, fail=fail), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                core = Core(root / "data", root / "config", test_mode=True, engine="sing-box")
+                from test_panel import node
+                core.apply(lambda s: dict(s, nodes=[node("vless-reality", 22001), node("trojan-tls", 22002)]))
+                before = core.backup()
+                env = root / "panel.env"
+                original = f"PANEL_CORE_ENGINE=sing-box\nPANEL_CONFIG_DIR={core.config_dir}\nPANEL_BIND=0.0.0.0:54322\n"
+                env.write_text(original)
+                (root / "core").mkdir()
+                active = root / "core/sing-box"; active.write_bytes(b"existing-core")
+                candidate = root / "candidate"; candidate.write_bytes(b"quic-core")
+                version = "with_utls,with_v2ray_api" + (",with_quic" if capable else "")
+                ops = types.SimpleNamespace(root_only=Mock(), PANEL_ENV=env, INSTALL=root, service=Mock(),
+                    env_values=manage.env_values, atomic_write=manage.atomic_write)
+                with patch.object(core_deploy, "permissions", return_value={}), \
+                     patch.object(core_deploy.subprocess, "run", return_value=types.SimpleNamespace(stdout=version)), \
+                     patch.object(core_deploy, "fetch_candidate", return_value=(candidate, {"version": "1.14.4"})) as fetch, \
+                     patch.object(core_deploy, "check_candidate"), \
+                     patch.object(core_deploy, "wait_runtime", side_effect=PanelError("failure") if fail else None):
+                    if fail:
+                        with self.assertRaisesRegex(PanelError, "恢复前一"):
+                            core_deploy.migrate(ops)
+                    else:
+                        core_deploy.migrate(ops)
+                    self.assertEqual(fetch.call_count, 0 if capable else 1)
+                self.assertEqual(active.read_bytes(), b"existing-core" if capable or fail else b"quic-core")
+                self.assertEqual(env.read_text(), original)
+                self.assertEqual(core.backup()["state"], before["state"])
+                self.assertEqual(core.backup()["usage"], before["usage"])
+
+    def test_new_build_without_quic_is_rejected_before_configuration_check(self):
+        with patch.object(core_deploy, "permissions", return_value={}), \
+             patch.object(core_deploy.subprocess, "run", return_value=types.SimpleNamespace(stdout="with_utls,with_v2ray_api")) as run:
+            with self.assertRaisesRegex(PanelError, "QUIC"):
+                core_deploy.check_candidate(Path("candidate"), Path("config.json"), require_quic=True)
+        self.assertEqual(run.call_count, 1)
+
     def test_failed_start_restores_xray_and_success_preserves_state_and_credentials(self):
         for fail in (False, True):
             with self.subTest(fail=fail), tempfile.TemporaryDirectory() as folder:

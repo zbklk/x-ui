@@ -82,7 +82,7 @@ sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测�
     <div class="dialog-head"><div><p class="eyebrow">INBOUND</p><h2 id="node-title">新建入站</h2></div><button type="button" class="close" data-close="node-dialog" aria-label="关闭">×</button></div>
     <div class="form-grid">
       <label>名称<input name="name" required maxlength="80"></label>
-      <label>协议<select name="protocol"><option value="vless-reality">VLESS · REALITY · Vision</option><option value="vless-ws-tls">VLESS · WebSocket · TLS</option><option value="vmess-ws-tls">VMess · WebSocket · TLS</option><option value="trojan-tls">Trojan · TCP · TLS</option><option value="shadowsocks2022">Shadowsocks 2022 · AES-128-GCM</option></select></label>
+      <label>协议<select name="protocol"><option value="vless-reality">VLESS · REALITY · Vision</option><option value="vless-ws-tls">VLESS · WebSocket · TLS</option><option value="vmess-ws-tls">VMess · WebSocket · TLS</option><option value="trojan-tls">Trojan · TCP · TLS</option><option value="shadowsocks2022">Shadowsocks 2022 · AES-128-GCM</option><option value="hysteria2">Hysteria2 · QUIC · TLS</option></select></label>
       <label>监听 IP<input name="listen" required value="::"></label>
       <label>端口<input name="port" type="number" required min="1" max="65535" value="20000"></label>
       <label>分享地址（可选）<input name="address" placeholder="留空使用全局设置" maxlength="253"></label>
@@ -96,6 +96,7 @@ sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测�
       <label data-protocol="reality">Short ID<input name="short_id" maxlength="16"></label>
       <div data-protocol="reality" class="field-action"><button type="button" id="generate-keys">重新生成 REALITY 密钥</button></div>
       <label data-protocol="ss">服务端主密钥<input name="server_key" type="password" autocomplete="off"></label>
+      <label data-protocol="hy2">Salamander 混淆密码（可选）<input name="obfs_password" type="password" maxlength="128" autocomplete="off" placeholder="留空不启用；启用时至少 8 字符"></label>
     </div>
     <p id="protocol-note" class="notice"></p>
     <div class="section-title compact"><h3>用户</h3><button type="button" id="add-client">＋ 添加用户</button></div>

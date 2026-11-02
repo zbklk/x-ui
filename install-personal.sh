@@ -179,7 +179,7 @@ if [[ -n "$site_domain" ]]; then
 fi
 cat <<'MSG'
 
-Personal Panel 0.4.0 已安装，代理核心为 sing-box。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
+Personal Panel 0.5.0 已安装，代理核心为 sing-box（支持 Hysteria2 / QUIC）。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
 如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin

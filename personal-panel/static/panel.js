@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let csrf = '', snapshot = null, editing = null, refreshing = false;
-const names = {'vless-reality':'VLESS · REALITY · Vision','vless-ws-tls':'VLESS · WS · TLS','vmess-ws-tls':'VMess · WS · TLS','trojan-tls':'Trojan · TLS','shadowsocks2022':'Shadowsocks 2022'};
+const names = {'vless-reality':'VLESS · REALITY · Vision','vless-ws-tls':'VLESS · WS · TLS','vmess-ws-tls':'VMess · WS · TLS','trojan-tls':'Trojan · TLS','shadowsocks2022':'Shadowsocks 2022','hysteria2':'Hysteria2 · QUIC · TLS'};
 const nodeForm = $('node-form');
 function el(tag, attrs={}, ...children) {
   const n=document.createElement(tag);
@@ -66,7 +66,7 @@ for(const button of document.querySelectorAll('[data-tab]'))button.onclick=()=>{
 for(const button of document.querySelectorAll('[data-close]'))button.onclick=()=>$(button.dataset.close).close();
 function randKey(){return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));}
 function randomUUID(){if(typeof crypto.randomUUID==='function')return crypto.randomUUID();const b=crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;}
-function newClient(){const p=nodeForm.elements.protocol.value;return {id:randomUUID(),name:'用户 '+($('client-editor').children.length+1),secret:p==='shadowsocks2022'?randKey():p==='trojan-tls'?Array.from(crypto.getRandomValues(new Uint8Array(18)),x=>x.toString(16).padStart(2,'0')).join(''):randomUUID(),enabled:true,expires_at:0,quota_bytes:0};}
+function newClient(){const p=nodeForm.elements.protocol.value;return {id:randomUUID(),name:'用户 '+($('client-editor').children.length+1),secret:p==='shadowsocks2022'?randKey():['trojan-tls','hysteria2'].includes(p)?Array.from(crypto.getRandomValues(new Uint8Array(18)),x=>x.toString(16).padStart(2,'0')).join(''):randomUUID(),enabled:true,expires_at:0,quota_bytes:0};}
 function field(label,name,value,type='text',attrs={}){const input=el('input',{'data-field':name,type,value,...attrs});return el('label',{},label,input);}
 function addClient(c){
  const row=el('div',{class:'client-edit','data-id':c.id});
@@ -74,9 +74,9 @@ function addClient(c){
  row.append(head,el('div',{class:'form-grid'},field('名称','name',c.name,'text',{required:'',maxlength:80}),field('密钥 / UUID','secret',c.secret,'text',{required:'',maxlength:128,autocomplete:'off'}),field('到期时间（本机时区）','expires_at',localInput(c.expires_at),'datetime-local'),field('流量上限 GiB（0 为不限）','quota_gb',c.quota_bytes/1073741824,'number',{min:0,max:931322574,step:'any'}),el('label',{class:'check'},el('input',{'data-field':'enabled',type:'checkbox',checked:c.enabled}),'启用用户')));
  $('client-editor').append(row);
 }
-function protocolFields(){const p=nodeForm.elements.protocol.value;for(const group of document.querySelectorAll('[data-protocol]')){const flags=group.dataset.protocol.split(' ');group.hidden=!flags.some(x=>x==='reality'?p==='vless-reality':x==='ws'?p.includes('ws'):x==='ss'?p==='shadowsocks2022':p!=='vless-reality'&&p!=='shadowsocks2022');}
+function protocolFields(){const p=nodeForm.elements.protocol.value;const visible={reality:p==='vless-reality',ws:p.includes('ws'),ss:p==='shadowsocks2022',hy2:p==='hysteria2',tls:p!=='vless-reality'&&p!=='shadowsocks2022'};for(const group of document.querySelectorAll('[data-protocol]'))group.hidden=!group.dataset.protocol.split(' ').some(x=>visible[x]);
  const site=snapshot?.status.site;
- $('protocol-note').textContent=p==='vless-reality'?(site?`已配置自有 HTTPS 小站 ${site.domain}:${site.port}。使用它时 SNI 和目标域名均填 ${site.domain}，目标端口填 ${site.port}；入站请使用其他端口。`:'REALITY 不使用面板证书。可在安装时创建自有 HTTPS 小站，或自行选择并验证可达的 TLS 1.3 目标域名。公钥需要与私钥对应。'):p==='shadowsocks2022'?'SS2022 使用服务端主密钥与用户密钥组合，不需要域名证书。':'TLS 入站需要先在“证书与维护”中签发证书；SNI 应被该证书覆盖。';
+ $('protocol-note').textContent=p==='vless-reality'?(site?`已配置自有 HTTPS 小站 ${site.domain}:${site.port}。使用它时 SNI 和目标域名均填 ${site.domain}，目标端口填 ${site.port}；入站请使用其他端口。`:'REALITY 不使用面板证书。可在安装时创建自有 HTTPS 小站，或自行选择并验证可达的 TLS 1.3 目标域名。公钥需要与私钥对应。'):p==='shadowsocks2022'?'SS2022 使用服务端主密钥与用户密钥组合，不需要域名证书。':p==='hysteria2'?'Hysteria2 使用 UDP 端口和域名 TLS 证书，SNI 填证书覆盖的域名。请在本机防火墙和云防火墙放行此端口 UDP；使用支持 Hysteria2 的客户端。混淆密码留空即可。':'TLS 入站需要先在“证书与维护”中签发证书；SNI 应被该证书覆盖。';
 }
 async function openNode(n=null){
  editing=n?n.id:null;nodeForm.reset();$('node-error').textContent='';$('node-title').textContent=n?'编辑入站与用户':'新建入站';$('client-editor').replaceChildren();
@@ -89,7 +89,7 @@ nodeForm.elements.protocol.onchange=()=>{protocolFields();if(!editing){$('client
 $('add-client').onclick=()=>addClient(newClient());
 $('generate-keys').onclick=()=>attempt(async()=>{if(editing&&!confirm('更换密钥后，所有已有 REALITY 分享链接需要重新导入。继续？'))return;const keys=await api('/api/keypair','POST');for(const [k,v] of Object.entries(keys))nodeForm.elements[k].value=v;});
 nodeForm.addEventListener('submit',async e=>{e.preventDefault();$('node-error').textContent='';const button=e.target.querySelector('[type=submit]');button.disabled=true;try{
- const n={};for(const k of ['name','protocol','listen','address','sni','dest','private_key','public_key','short_id','path','server_key'])n[k]=nodeForm.elements[k].value.trim();for(const k of ['port','dest_port'])n[k]=Number(nodeForm.elements[k].value);n.enabled=nodeForm.elements.enabled.checked;
+ const n={};for(const k of ['name','protocol','listen','address','sni','dest','private_key','public_key','short_id','path','server_key'])n[k]=nodeForm.elements[k].value.trim();n.obfs_password=nodeForm.elements.obfs_password.value;for(const k of ['port','dest_port'])n[k]=Number(nodeForm.elements[k].value);n.enabled=nodeForm.elements.enabled.checked;
  n.clients=Array.from($('client-editor').children,row=>{const f=k=>row.querySelector(`[data-field="${k}"]`);return{id:row.dataset.id,name:f('name').value,secret:f('secret').value,enabled:f('enabled').checked,expires_at:f('expires_at').value?Math.floor(new Date(f('expires_at').value).getTime()/1000):0,quota_bytes:Math.round(Number(f('quota_gb').value)*1073741824)};});
  await api(editing?`/api/nodes/${editing}`:'/api/nodes',editing?'PUT':'POST',n);$('node-dialog').close();toast('配置校验通过，已提交到独立代理服务');await refresh();
  }catch(error){$('node-error').textContent=error.message;}finally{button.disabled=false;}});

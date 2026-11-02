@@ -15,17 +15,17 @@
     ]
   },
   "singbox": {
-    "tag_name": "personal-sing-box-v1.14.4-1",
+    "tag_name": "personal-sing-box-v1.14.4-2",
     "assets": [
       {
         "name": "personal-sing-box-1.14.4-linux-amd64.tar.gz",
-        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-1/personal-sing-box-1.14.4-linux-amd64.tar.gz",
-        "digest": "sha256:d199ac3629cc2c48d677db3ec7c00e4112d9e1cd50052ad9a97651c5e85d48f1"
+        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-2/personal-sing-box-1.14.4-linux-amd64.tar.gz",
+        "digest": "sha256:15086bc1dc507270a665c45bd26b60a480f0fee358aa82bdc440b96a41f60d6f"
       },
       {
         "name": "personal-sing-box-1.14.4-linux-arm64.tar.gz",
-        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-1/personal-sing-box-1.14.4-linux-arm64.tar.gz",
-        "digest": "sha256:3cbbed245bad902e32b1f41543961b1fb05fb302d5bf4bfa9816438989444af5"
+        "browser_download_url": "https://github.com/zbklk/x-ui/releases/download/personal-sing-box-v1.14.4-2/personal-sing-box-1.14.4-linux-arm64.tar.gz",
+        "digest": "sha256:ac95cf62a7b52536d10fb9ea9b0b3e90805186cc26c9731769cfdde4a6e1a2e4"
       }
     ]
   },

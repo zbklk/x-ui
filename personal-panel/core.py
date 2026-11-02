@@ -1,4 +1,4 @@
-"""Personal Panel: validated state, Xray configuration and durable accounting.
+"""Personal Panel: validated state, proxy configuration and durable accounting.
 
 New implementation. No legacy x-ui database or binaries are loaded.
 """
@@ -24,8 +24,8 @@ import time
 import uuid
 from urllib.parse import quote, urlencode
 
-VERSION = "0.4.0"
-PROTOCOLS = ("vless-reality", "vless-ws-tls", "vmess-ws-tls", "trojan-tls", "shadowsocks2022")
+VERSION = "0.5.0"
+PROTOCOLS = ("vless-reality", "vless-ws-tls", "vmess-ws-tls", "trojan-tls", "shadowsocks2022", "hysteria2")
 DEFAULT_SETTINGS = {"public_address": "", "ipv4_only": True, "block_private": True, "loglevel": "warning"}
 PRIVATE_IPS = ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
                "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4",
@@ -137,6 +137,10 @@ def clean_node(data):
             raise PanelError("WebSocket 路径需以 / 开头且不含查询串")
     if protocol == "shadowsocks2022":
         n["server_key"] = b64key(data.get("server_key", ""), 16)
+    if protocol == "hysteria2":
+        n["obfs_password"] = text(data.get("obfs_password", ""), "Salamander 混淆密码", 128, empty=True)
+        if n["obfs_password"] and len(n["obfs_password"]) < 8:
+            raise PanelError("Salamander 混淆密码至少 8 字符，留空则不启用")
     clients = data.get("clients", [])
     if not isinstance(clients, list) or not 1 <= len(clients) <= 200:
         raise PanelError("每个入站需要 1–200 个用户")
@@ -150,7 +154,9 @@ def clean_node(data):
         elif protocol == "shadowsocks2022":
             password = b64key(password, 16)
         elif len(password) < 16:
-            raise PanelError("Trojan 密码至少 16 字符")
+            raise PanelError("Hysteria2 密码至少 16 字符" if protocol == "hysteria2" else "Trojan 密码至少 16 字符")
+        if protocol == "hysteria2" and any(old["secret"] == password for old in n["clients"]):
+            raise PanelError("同一 Hysteria2 入站的用户密码不能重复")
         n["clients"].append({"id": uid(c.get("id", str(uuid.uuid4()))),
                              "name": text(c.get("name", "用户"), "用户名称", 80), "secret": password,
                              "enabled": boolean(c.get("enabled", True), "用户启用状态"),
@@ -204,6 +210,8 @@ def owned_site(environ=None):
 
 
 def xray_config(state, usage=None, now=None, stats_port=18387, tls_dir="/var/lib/personal-panel-tls"):
+    if any(n["protocol"] == "hysteria2" for n in state["nodes"]):
+        raise PanelError("Hysteria2 需要 sing-box 核心，请先运行最新版安装脚本")
     usage, now = usage or {}, time.time() if now is None else now
     settings = state["settings"]
     site = owned_site()
@@ -276,6 +284,11 @@ def share_link(n, c, default_address):
         raise PanelError("请先设置分享地址（公网 IP 或域名）")
     address = f"[{address}]" if ":" in address else address
     label = n["name"] + " / " + c["name"]
+    if n["protocol"] == "hysteria2":
+        params = {"sni": n["sni"]}
+        if n.get("obfs_password"):
+            params.update({"obfs": "salamander", "obfs-password": n["obfs_password"]})
+        return f"hysteria2://{quote(c['secret'], safe='')}@{address}:{n['port']}/?{urlencode(params)}#{quote(label)}"
     if n["protocol"] == "shadowsocks2022":
         auth = base64.urlsafe_b64encode(f"2022-blake3-aes-128-gcm:{n['server_key']}:{c['secret']}".encode()).decode().rstrip("=")
         return f"ss://{auth}@{address}:{n['port']}#{quote(label)}"
@@ -441,13 +454,15 @@ class Core:
     def check_new_ports(self, current, state, usage):
         def live(n):
             return n["enabled"] and any(active_client(c, usage, time.time()) for c in n["clients"])
-        old_tcp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n)}
-        old_udp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n) and n["protocol"] == "shadowsocks2022"}
+        old_tcp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n) and n["protocol"] != "hysteria2"}
+        old_udp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n) and n["protocol"] in ("shadowsocks2022", "hysteria2")}
         for n in state["nodes"]:
             if not live(n):
                 continue
             for kind, old in ((socket.SOCK_STREAM, old_tcp), (socket.SOCK_DGRAM, old_udp)):
-                if kind == socket.SOCK_DGRAM and n["protocol"] != "shadowsocks2022":
+                if kind == socket.SOCK_DGRAM and n["protocol"] not in ("shadowsocks2022", "hysteria2"):
+                    continue
+                if kind == socket.SOCK_STREAM and n["protocol"] == "hysteria2":
                     continue
                 if (n["listen"], n["port"]) in old:
                     continue
@@ -456,7 +471,7 @@ class Core:
                         check.bind((n["listen"], n["port"]))
                 except OSError as error:
                     if n["port"] < 1024 and error.errno in (errno.EACCES, errno.EPERM):
-                        # Only the separate Xray unit has CAP_NET_BIND_SERVICE.
+                        # Only the separate proxy core has CAP_NET_BIND_SERVICE.
                         continue
                     raise PanelError(f"端口 {n['port']} 不可绑定，请检查端口占用、监听 IP 以及低端口权限") from None
 

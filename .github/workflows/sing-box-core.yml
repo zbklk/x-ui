@@ -1,4 +1,4 @@
-name: Build sing-box with user statistics
+name: Build sing-box with QUIC and user statistics
 
 on:
   push:
@@ -58,7 +58,7 @@ jobs:
           release=$(python3 -c 'import json;print(json.load(open("personal-panel/singbox-source.json"))["release_tag"])')
           cat > dist/NOTES.md <<'EOF'
           Built from unmodified SagerNet/sing-box source, pinned by personal-panel/singbox-source.json.
-          Build tags: with_utls,with_v2ray_api. The extra statistics module preserves per-user traffic accounting and quotas.
+          Build tags: with_quic,with_utls,with_v2ray_api. QUIC enables Hysteria2; the statistics module preserves per-user traffic accounting and quotas.
           Both archives contain the upstream GPL license and exact source/build metadata. This workflow is the reproducible build recipe.
           EOF
           if ! gh release view "$release" >/dev/null 2>&1; then

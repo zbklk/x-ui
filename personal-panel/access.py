@@ -38,6 +38,8 @@ class AccessPolicy:
         tls = env.get("PANEL_TLS", "off")
         if tls not in ("on", "off"):
             raise ValueError("PANEL_TLS must be on or off")
+        if mode == "public" and tls != "on":
+            raise ValueError("Public management access requires HTTPS; use private mode until a certificate is configured")
         clients = env.get("PANEL_ALLOWED_CLIENTS", "0.0.0.0/0,::/0" if mode == "public" else "127.0.0.0/8,::1/128")
         networks = tuple(ipaddress.ip_network(n.strip()) for n in clients.split(",") if n.strip())
         if not networks:

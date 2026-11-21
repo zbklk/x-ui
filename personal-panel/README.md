@@ -4,7 +4,7 @@
 
 从 0.3.x 升级时自动把本面板的 Xray 节点配置迁移到 sing-box；0.4.x 的 sing-box 若缺少 QUIC，安装器自动升级核心以启用 Hysteria2。保留账号、原节点、密钥、累计流量与证书，原分享链接可继续使用；启动检查失败恢复原核心。内核由 [公开工作流](../.github/workflows/sing-box-core.yml) 从未修改的官方源码构建，开启官方 `with_quic,with_utls,with_v2ray_api` 标签，支持 Hysteria2、REALITY 和逐用户流量统计。版本、源码提交及构建信息见 [singbox-source.json](singbox-source.json)。VPS 下载已构建并校验 SHA-256 的发布包。
 
-安装时填写已解析域名后，自动使用 HTTPS 域名 + 管理端口登录，再创建节点；跳过域名时可通过 VPS 公网 IP + 管理端口登录。已有 0.1.0 实例重新运行安装命令会保留账号与节点，并切换为公网访问。明确选择的私有模式在升级时保留。
+新安装默认仅监听本机，跳过域名时必须使用 SSH 隧道访问，不再开放公网 HTTP。安装时填写已解析域名、完成证书签发后，自动通过 HTTPS 域名 + 管理端口公网登录，再创建节点。旧公网 HTTP 实例升级时先切为本机监听，HTTPS 完成后恢复公网；明确选择的私有模式在升级时保留。
 
 安装、访问、Cloudflare Token 自动续签、权限、备份及验证范围见 [根目录 README](../README.md)。安装入口为 [install-personal.sh](../install-personal.sh)。
 

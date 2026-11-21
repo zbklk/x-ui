@@ -81,7 +81,7 @@ class SiteConfigurationTests(unittest.TestCase):
             with self.subTest(fail=fail), tempfile.TemporaryDirectory() as folder:
                 panel = Path(folder) / "panel.env"
                 site = Path(folder) / "site.env"
-                original = "PANEL_ACCESS=public\nPANEL_BIND=0.0.0.0:54322\nPANEL_TLS=off\nPANEL_ALLOWED_CLIENTS=0.0.0.0/0\n"
+                original = "PANEL_ACCESS=private\nPANEL_BIND=127.0.0.1:54322\nPANEL_TLS=off\nPANEL_ALLOWED_CLIENTS=127.0.0.0/8,::1/128\n"
                 panel.write_text(original)
                 service = Mock(return_value=types.SimpleNamespace(returncode=3))
                 ops = types.SimpleNamespace(root_only=Mock(), PANEL_ENV=panel, env_values=manage.env_values,
@@ -98,7 +98,7 @@ class SiteConfigurationTests(unittest.TestCase):
                         ownsite.setup(args, ops)
                         values = manage.env_values(panel)
                         self.assertEqual(values["PANEL_TLS"], "off")
-                        self.assertEqual(values["PANEL_BIND"], "0.0.0.0:54322")
+                        self.assertEqual(values["PANEL_BIND"], "127.0.0.1:54322")
                         self.assertEqual(values["PANEL_SITE_PORT"], "8443")
                         self.assertEqual(site.stat().st_mode & 0o777, 0o600)
                 self.assertFalse(ops.certificate.call_args.args[0].panel_https)

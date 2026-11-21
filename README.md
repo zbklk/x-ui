@@ -2,7 +2,7 @@
 
 独立实现的私人节点管理面板，当前版本 **0.5.0**，默认核心为 **sing-box 1.14.4**（含 QUIC / Hysteria2 与逐用户统计模块）。
 
-默认支持 **VPS 公网 IP + 端口直接登录**，出门使用电脑或手机浏览器即可管理节点，无需保持 SSH 隧道。域名和 HTTPS 可选；Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与 sing-box 官方源码统计构建，前端无需外部 CDN。
+管理面板**默认只监听本机**，避免在公网明文 HTTP 传输登录凭据。安装时配置域名并完成证书签发后，可通过 **HTTPS 域名 + 管理端口** 公网登录；未启用 HTTPS 时请通过 SSH 隧道访问。Cloudflare API Token 与网页进程隔离，并提供自动续签、配置校验、流量额度和备份恢复。采用 Python / Flask / Gunicorn / SQLite 与 sing-box 官方源码统计构建，前端无需外部 CDN。
 
 **这不是旧 x-ui 的完整升级版，不使用闭源发布包。** 原有 Go 代码与 `install.sh` 保留，旧说明见 [README.legacy.md](README.legacy.md)。新代码位于 [personal-panel/](personal-panel/)。
 
@@ -20,26 +20,25 @@ bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubuser
 
 安装后半段可输入已解析到 VPS 的域名，自动创建简单 HTTPS 网站、申请证书、启用自动续签，并让面板共用证书，输出 **HTTPS 域名 + 管理端口** 登录地址。登录后新建 REALITY 会预填 SNI、目标域名和目标端口。没有域名可直接回车跳过，之后随时运行 `panelctl site 你的域名 --panel-https`。
 
-安装完成后，直接在任何电脑或手机的浏览器打开安装输出的地址：
+填写域名并成功配置证书后，可在浏览器直接访问 `https://你的域名:54322/`。如跳过域名，则面板仅监听 `127.0.0.1:54322`，**不会开放公网 HTTP 登录**。此时在本地电脑通过 SSH 建立隧道：
 
-```text
-填写域名并成功配置证书：https://你的域名:54322/
-跳过域名设置：http://你的VPS公网IP:54322/
+```bash
+ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
 ```
 
-使用刚才设置的管理员账号和密码登录即可；**不需要 SSH 隧道，也不强制使用域名或固定来源 IP**。IPv6 地址需加方括号，例如 `http://[你的IPv6]:54322/`。无人值守安装不会创建默认账号，可在 VPS 执行 `panelctl admin` 创建。
+然后在浏览器访问 `http://127.0.0.1:54322/`；若已启用 HTTPS，按证书覆盖的域名访问。使用安装时创建的账号登录。无人值守安装不会创建默认账号，可在 VPS 运行 `sudo panelctl admin`。
 
-填写域名时会自动启用 HTTPS；跳过域名时保留 IP + 端口的 HTTP 访问。HTTP 会明文传输登录信息；之后可按下文启用域名 HTTPS。已经配置好的 HTTPS 在升级时保留。
+公网管理必须启用 HTTPS；`panelctl access public` 在没有证书时会拒绝执行。SSH 隧道模式允许本机 HTTP，因为流量通过 SSH 加密。已配置的 HTTPS 在升级时保留。
 
-安装会尝试放行已启用的 UFW 中对应的管理 TCP 端口，不启用 UFW，也不改动 SSH 放行规则。**如启用了云平台安全组、云防火墙或其他主机防火墙，还需放行所选管理端口的 TCP。**统计端口 18387 始终只供本机使用，无需开放。
+只有启用 HTTPS 公网管理后才需在防火墙放行管理 TCP 端口；脚本不会启用 UFW 或更改 SSH 规则。统计端口 18387 始终仅供本机使用，不对公网开放。
 
 安装器和 `panelctl` 自动使用 UTF-8，兼容 Debian 12 等精简系统及 SSH 会话中继承的 ASCII 编码设置，无需修改系统 locale。旧版若在依赖安装后提示 `UnicodeEncodeError`，重新执行上方安装命令获取修复即可；`Ignoring ... markers` 和 `Requirement already satisfied` 是正常依赖提示。
 
 ### 已有面板升级
 
-再次执行上方同一条安装命令即可。原来的管理员、密码、节点、流量与证书保留；旧版仅本机访问的配置会自动切换为公网直连。若希望继续使用默认端口，端口提示直接回车即可，无需卸载重装。
+再次执行上方同一条安装命令即可。原来的管理员、密码、节点、流量与证书保留。**旧版公网 HTTP 实例升级时会先改为本机 / SSH 隧道管理**；完成域名 HTTPS 配置后恢复公网入口。如未配置域名，将继续保持私有模式，避免明文账号密码泄露。
 
-0.2.0 以后通过 `panelctl access private` 明确选择的私有模式，会在下次升级中保留。
+已有公网 HTTPS 实例继续保持公网 HTTPS；明确通过 `panelctl access private` 设为私有模式的实例，升级后仍保持私有模式，不会自动对公网开放。管理端口可直接回车保留。
 
 ### 0.4.x 升级并增加 Hysteria2
 
@@ -75,7 +74,7 @@ panelctl access show
 panelctl access public --port 55443
 ```
 
-修改后使用输出的新地址登录。也可用 `--address 你的公网IP` 指定输出地址（适合 NAT 等无法自动识别公网 IP 的环境），或通过 `--listen ::` 监听 IPv6。命令仅重启面板，保留节点和账号；启动失败自动恢复原访问配置。
+公网管理要求事先签发并启用 HTTPS 证书；未配置证书时执行 `panelctl access public` 会报错，无法退化为明文 HTTP。修改后使用输出的新地址登录，也可通过 `--listen ::` 监听 IPv6。命令仅重启面板，保留节点和账号；启动失败恢复原访问配置。
 
 安装不会卸载旧 x-ui，不会修改其数据库和证书。新旧节点不能占用同一端口。GitHub 保存代码和安装脚本，面板实际运行在 VPS，不能部署到 GitHub Pages。
 
@@ -85,8 +84,8 @@ panelctl access public --port 55443
 | --- | --- |
 | 协议 | VLESS REALITY Vision、VLESS WS TLS、VMess WS TLS、Trojan TCP TLS、SS2022 AES-128-GCM、Hysteria2 |
 | 用户 | 单端口多用户、启停、UUID / 密码、到期时间、累计流量额度 |
-| 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；支持公网 HTTP 下生成 UUID 及复制链接 |
-| 管理访问 | 安装填写域名后自动 HTTPS 域名 + 端口；跳过域名可用公网 IP + 端口；支持来源限制及私有模式 |
+| 分享 | 分享链接、本地二维码、IPv4 / IPv6 分享地址；通过安全管理入口复制链接 |
+| 管理访问 | 首次安装默认本机 / SSH 隧道；成功配置域名证书后启用公网 HTTPS；支持来源限制 |
 | 出站 | 默认仅 IPv4；可切换双栈；默认阻止访问本机及内网 |
 | 配置 | 校验 REALITY 密钥对、TLS SNI、新端口和核心配置后写入；独立服务加载 |
 | 证书 | 单个域名、Cloudflare 指定 Zone 的 Token、DNS-01、自动续签与加载钩子 |
@@ -96,7 +95,7 @@ panelctl access public --port 55443
 
 REALITY 可使用安装器创建的自有小站，或自行选择并验证其他 TLS 目标。REALITY 入站本身和 SS2022 无需证书；自有 HTTPS 目标网站及 TLS 协议需要证书。自有目标更便于维护，但不保证在所有网络下比第三方目标更合适。
 
-防火墙需放行面板管理 TCP 端口；VLESS / VMess / Trojan 节点使用 TCP，SS2022 使用 TCP / UDP，Hysteria2 节点使用 UDP。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
+仅公网 HTTPS 管理需要放行面板管理 TCP 端口；VLESS / VMess / Trojan 节点使用 TCP，SS2022 使用 TCP / UDP，Hysteria2 节点使用 UDP。统计端口 18387 不对公网开放，原 SSH 放行规则照常保留。
 
 ## 可选：自有 HTTPS 网站与 REALITY 目标
 
@@ -161,15 +160,16 @@ sudo systemctl start personal-acme.service
 
 如果旧面板曾使用 Global API Key，本安装不改动它的任务。新配置验证后，应在 Cloudflare 轮换旧全局密钥，并同步处理其他使用旧密钥的服务。
 
-## 可选 HTTPS 与私有访问
+## HTTPS 公网访问与私有管理
 
-默认公网 IP 访问不需要域名。希望加密面板登录时，将自己的域名解析到 VPS，再执行：
+默认仅本机 / SSH 隧道可访问管理面板。需要从公网管理时，先将域名解析到 VPS，申请并启用证书，然后手动开放公网管理：
 
 ```bash
 sudo panelctl cert panel.example.com --panel-https
+sudo panelctl access public
 ```
 
-完成后使用 `https://panel.example.com:管理端口/` 登录；面板继续使用当前监听范围，证书自动续签。请用证书覆盖的域名访问，以避免 IP 与域名证书不匹配。凭据仍由独立证书服务管理。
+完成后使用 `https://panel.example.com:管理端口/` 登录；证书自动续签。请用证书覆盖的域名访问，避免 IP 和域名证书不匹配。已有 HTTPS 公网实例升级时保留访问模式。
 
 如需限制到指定来源 IP，可显式配置（默认不限制）：
 
@@ -191,7 +191,7 @@ sudo panelctl access private
 ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
 ```
 
-私有模式是可选项。管理端口不是 54322 时同步替换隧道端口；SSH 端口不是 22 时在 `ssh` 后加 `-p 实际SSH端口`。已经启用 HTTPS 时需使用证书域名访问。
+私有模式是新安装的默认设置。管理端口不是 54322 时同步替换隧道端口；SSH 端口不是 22 时在 `ssh` 后加 `-p 实际SSH端口`。已经启用 HTTPS 时需使用证书域名访问（可通过本地 DNS/hosts 将域名指向隧道端点）。
 
 ## 维护与恢复
 

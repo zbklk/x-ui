@@ -264,6 +264,8 @@ def configure_access(args):
         elif args.https:
             values["PANEL_TLS"] = "on"
         values.setdefault("PANEL_TLS", "off")
+        if args.mode == "public" and values["PANEL_TLS"] != "on":
+            raise PanelError("禁止公网 HTTP 管理；请先用 panelctl cert 域名 --panel-https 配置证书，或使用私有模式")
         policy = AccessPolicy.from_env(values)
         if port == int(values.get("PANEL_STATS_PORT", "18387")):
             raise PanelError("管理端口不能与统计端口相同")

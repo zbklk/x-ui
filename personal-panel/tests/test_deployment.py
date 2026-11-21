@@ -186,5 +186,19 @@ if [[ "$*" == *" --renew "* ]]; then exit "${FAKE_RENEW_RESULT:-2}"; fi
         self.assertFalse((self.root / 'data/panel.example.com.installed').exists())
 
 
+class SecurityDefaultTests(unittest.TestCase):
+    def test_new_installer_binds_private_http_until_https_is_ready(self):
+        script = (Path(__file__).resolve().parents[2] / "install-personal.sh").read_text()
+        self.assertIn("PANEL_ACCESS=private", script)
+        self.assertIn("PANEL_BIND=127.0.0.1:54322", script)
+        self.assertIn("publish_after_https", script)
+
+    def test_legacy_installer_verifies_https_certificates(self):
+        script = (Path(__file__).resolve().parents[2] / "install.sh").read_text()
+        self.assertNotIn("--no-check-certificate", script)
+        self.assertIn("--https-only", script)
+        self.assertIn("ca-certificates", script)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -21,7 +21,7 @@ from core import Core, PanelError
 import manage
 
 PUBLIC = {"PANEL_ACCESS": "public", "PANEL_BIND": "0.0.0.0:54322",
-          "PANEL_ALLOWED_CLIENTS": "0.0.0.0/0,::/0", "PANEL_TLS": "off"}
+          "PANEL_ALLOWED_CLIENTS": "0.0.0.0/0,::/0", "PANEL_TLS": "on"}
 
 
 class AccessPolicyTests(unittest.TestCase):
@@ -31,6 +31,13 @@ class AccessPolicyTests(unittest.TestCase):
         self.assertTrue(p.accepts_host("[2001:db8::10]:54322"))
         self.assertTrue(p.accepts_client("198.51.100.11"))
         self.assertTrue(p.accepts_client("2001:db8::11"))
+        self.assertTrue(p.tls)
+
+    def test_public_http_is_rejected_but_local_http_is_allowed(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            AccessPolicy.from_env(dict(PUBLIC, PANEL_TLS="off"))
+        p = AccessPolicy.from_env({"PANEL_ACCESS": "private",
+                                   "PANEL_BIND": "127.0.0.1:54322", "PANEL_TLS": "off"})
         self.assertFalse(p.tls)
 
     def test_dns_rebinding_and_malformed_host_rejected(self):
@@ -64,7 +71,7 @@ class AccessCLITests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.env = Path(self.tmp.name) / "panel.env"
-        self.original = "PANEL_BIND=127.0.0.1:55444\nPANEL_ALLOWED_HOSTS=localhost,127.0.0.1,[::1]\nPANEL_ALLOWED_CLIENTS=127.0.0.0/8,::1/128\nPANEL_TLS=off\nPANEL_STATS_PORT=18387\nPANEL_CUSTOM=keep\n"
+        self.original = "PANEL_BIND=127.0.0.1:55444\nPANEL_ALLOWED_HOSTS=localhost,127.0.0.1,[::1]\nPANEL_ALLOWED_CLIENTS=127.0.0.0/8,::1/128\nPANEL_TLS=on\nPANEL_STATS_PORT=18387\nPANEL_CUSTOM=keep\n"
         self.env.write_text(self.original)
 
     def tearDown(self):
@@ -75,7 +82,7 @@ class AccessCLITests(unittest.TestCase):
              allow_client=None, http=False, https=False, no_restart=False, no_firewall=True), **changes))
 
     def configure(self, args, failure=False):
-        with patch.object(manage, "PANEL_ENV", self.env), patch.object(manage, "root_only"), patch.object(manage, "panel_health"), patch.object(manage, "service") as service, patch("builtins.print"):
+        with patch.object(manage, "PANEL_ENV", self.env), patch.object(manage, "root_only"), patch.object(manage, "panel_health"), patch.object(manage, "service") as service, patch.object(manage.ssl, "SSLContext"), patch("builtins.print"):
             if failure:
                 service.side_effect = [subprocess.CalledProcessError(1, "systemctl"), None]
             manage.configure_access(args)
@@ -105,6 +112,13 @@ class AccessCLITests(unittest.TestCase):
             self.configure(self.args(), failure=True)
         self.assertEqual(self.env.read_text(), self.original)
 
+    def test_public_http_cli_is_rejected_before_writing_settings(self):
+        self.original = self.original.replace("PANEL_TLS=on", "PANEL_TLS=off")
+        self.env.write_text(self.original)
+        with self.assertRaisesRegex(PanelError, "禁止公网 HTTP"):
+            self.configure(self.args())
+        self.assertEqual(self.env.read_text(), self.original)
+
     def test_invalid_port_does_not_change_config(self):
         for port in (22, 18387, 65536):
             with self.assertRaises(PanelError):
@@ -130,7 +144,7 @@ class PublicAPITests(unittest.TestCase):
         with patch.dict(os.environ, PUBLIC):
             self.app = create_app(self.core, testing=False)
         self.client = self.app.test_client()
-        self.base = "http://203.0.113.10:54322"
+        self.base = "https://203.0.113.10:54322"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -154,8 +168,8 @@ class PublicAPITests(unittest.TestCase):
         self.assertEqual(self.core.state()["settings"]["public_address"], "203.0.113.10")
 
     def test_ipv6_literal_and_unconfigured_domain(self):
-        self.assertEqual(self.client.get("/", base_url="http://[2001:db8::10]:54322").status_code, 200)
-        self.assertEqual(self.client.get("/", base_url="http://attacker.example:54322").status_code, 400)
+        self.assertEqual(self.client.get("/", base_url="https://[2001:db8::10]:54322").status_code, 200)
+        self.assertEqual(self.client.get("/", base_url="https://attacker.example:54322").status_code, 400)
 
     def test_attackers_on_other_ips_do_not_lock_out_owner(self):
         with self.core.db() as db:
@@ -172,10 +186,10 @@ class PublicAPITests(unittest.TestCase):
 
 
 class PublicListenerTests(unittest.TestCase):
-    def test_gunicorn_public_listener_really_serves_login_without_tls(self):
+    def test_gunicorn_private_listener_works_over_ssh_tunnel_http(self):
         self.listener_roundtrip(False)
 
-    def test_gunicorn_public_listener_retains_optional_https(self):
+    def test_gunicorn_public_listener_requires_https(self):
         self.listener_roundtrip(True)
 
     def test_domain_https_login_validates_certificate_and_opens_workspace(self):
@@ -191,7 +205,10 @@ class PublicListenerTests(unittest.TestCase):
                 s.bind(("127.0.0.1",0))
                 port = s.getsockname()[1]
             env = dict(os.environ, **PUBLIC)
-            env.update(PANEL_BIND=f"0.0.0.0:{port}", PANEL_DATA_DIR=str(core.data), PANEL_XRAY_DIR=str(core.config_dir))
+            env.update(PANEL_BIND=f"{'0.0.0.0' if tls else '127.0.0.1'}:{port}",
+                       PANEL_DATA_DIR=str(core.data), PANEL_XRAY_DIR=str(core.config_dir))
+            if not tls:
+                env.update(PANEL_ACCESS="private", PANEL_TLS="off", PANEL_ALLOWED_CLIENTS="127.0.0.0/8,::1/128")
             if domain:
                 env.update(PANEL_ALLOWED_HOSTS=f"localhost,127.0.0.1,[::1],{domain}", PANEL_PUBLIC_ADDRESS=domain)
             if tls:
@@ -208,7 +225,7 @@ class PublicListenerTests(unittest.TestCase):
                     # verification and the real HTTPS login fully enabled.
                     connection._create_connection = lambda address, timeout, source_address=None: socket.create_connection(("127.0.0.1", port), timeout, source_address)
                 return connection
-            authority = f"{domain or '203.0.113.10'}:{port}"
+            authority = f"{domain or ('203.0.113.10' if tls else '127.0.0.1')}:{port}"
             process = subprocess.Popen([sys.executable,"-m","gunicorn","--config","gunicorn.conf.py","wsgi:application"],
                                        cwd=Path(__file__).resolve().parents[1], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:

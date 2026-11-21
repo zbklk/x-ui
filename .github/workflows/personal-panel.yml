@@ -28,7 +28,7 @@ jobs:
       - name: Check Python and shell syntax
         run: |
           python -m compileall -q personal-panel
-          bash -n install-personal.sh personal-panel/deploy/acme-renew.sh personal-panel/deploy/cert-deployed.sh personal-panel/deploy/panelctl
+          bash -n install-personal.sh install.sh personal-panel/deploy/acme-renew.sh personal-panel/deploy/cert-deployed.sh personal-panel/deploy/panelctl
           node --check personal-panel/static/panel.js
           python -m pip check
       - name: Download and verify pinned sing-box and Xray test client

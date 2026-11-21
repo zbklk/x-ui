@@ -28,16 +28,32 @@ mkdir "$work/source"
 tar --extract --gzip --file "$work/source.tar.gz" --directory "$work/source" --strip-components=1
 source_dir="$work/source/personal-panel"
 
-# Old 0.1.x configs have no access-mode marker and migrate to public. Preserve
-# private mode only when an operator explicitly selected it in 0.2.x or later.
-install_access=${PANEL_ACCESS:-$(python3 - <<'PY'
+# Never expose an HTTP management listener on the public Internet.
+# Fresh installs start on loopback; an existing public HTTPS installation stays public.
+# A legacy public HTTP installation moves to SSH-only access until HTTPS is issued.
+[[ -z ${PANEL_ACCESS:-} || "${PANEL_ACCESS:-}" == public || "${PANEL_ACCESS:-}" == private ]] || { echo '访问模式只能为 public 或 private'; exit 1; }
+readarray -t prior_access < <(python3 - <<'PY'
 from pathlib import Path
 p=Path('/etc/personal-panel/panel.env')
 values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#')) if p.exists() else {}
-print(values.get('PANEL_ACCESS','public'))
+print(values.get('PANEL_ACCESS', 'new'))
+print(values.get('PANEL_TLS', 'off'))
 PY
-)}
-[[ "$install_access" == public || "$install_access" == private ]] || { echo '访问模式只能为 public 或 private'; exit 1; }
+)
+requested_access=${PANEL_ACCESS:-${prior_access[0]}}
+existing_tls=${prior_access[1]}
+[[ "$requested_access" == new || "$requested_access" == public || "$requested_access" == private ]] || { echo '原访问模式无效'; exit 1; }
+install_access=private
+publish_after_https=0
+if [[ "$requested_access" != private ]]; then
+  publish_after_https=1
+  if [[ "$requested_access" == public && "$existing_tls" == on ]]; then
+    install_access=public
+  fi
+fi
+if [[ "$requested_access" == public && "$install_access" == private ]]; then
+  printf '%s\n' '安全升级：原公网 HTTP 管理将暂时切为仅 SSH 隧道访问；成功配置 HTTPS 后才恢复公网。'
+fi
 
 default_port=$(python3 - <<'PY'
 from pathlib import Path
@@ -121,10 +137,10 @@ python3 -m venv /opt/personal-panel/venv
 /opt/personal-panel/venv/bin/python -m pip check
 if [[ ! -f /etc/personal-panel/panel.env ]]; then
   cat > /etc/personal-panel/panel.env <<'ENV'
-PANEL_ACCESS=public
-PANEL_BIND=0.0.0.0:54322
+PANEL_ACCESS=private
+PANEL_BIND=127.0.0.1:54322
 PANEL_ALLOWED_HOSTS=localhost,127.0.0.1,[::1]
-PANEL_ALLOWED_CLIENTS=0.0.0.0/0,::/0
+PANEL_ALLOWED_CLIENTS=127.0.0.0/8,::1/128
 PANEL_TLS=off
 PANEL_STATS_PORT=18387
 PANEL_CORE_ENGINE=sing-box
@@ -150,8 +166,8 @@ if [[ -t 0 ]]; then
     panelctl admin
   fi
 fi
-# Apply to upgrades as well: legacy localhost-only installations become public.
-# Existing administrator, nodes, accounting and TLS settings remain in place.
+# Apply secure policy to upgrades as well; keep nodes, accounting and TLS settings.
+# Public HTTP is never started, even temporarily during a legacy migration.
 panelctl access "$install_access" --port "$selected_port" --no-restart
 systemctl enable --now personal-panel.service
 systemctl is-active --quiet personal-panel.service personal-core.service
@@ -173,26 +189,30 @@ if [[ -n "$site_domain" ]]; then
   site_options=(--panel-https)
   [[ -z ${PANEL_SITE_PORT:-} ]] || site_options+=(--port "$PANEL_SITE_PORT")
   if ! panelctl site "$site_domain" "${site_options[@]}"; then
-    printf '%s\n' '面板已完成升级，但域名 HTTPS 设置未完成。请检查 DNS、Token 和服务日志，再运行 sudo panelctl site 你的域名 --panel-https。'
+    printf '%s\n' '面板已完成升级，但域名 HTTPS 设置未完成。管理入口仍为仅本机/SSH 隧道模式；请检查 DNS、Token 和日志，再运行 sudo panelctl site 你的域名 --panel-https。'
     exit 1
+  fi
+  if [[ "$publish_after_https" == 1 && "$install_access" == private ]]; then
+    panelctl access public --port "$selected_port"
+    install_access=public
   fi
 fi
 cat <<'MSG'
 
 Personal Panel 0.5.0 已安装，代理核心为 sing-box（支持 Hysteria2 / QUIC）。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
-如启用了云平台安全组或云防火墙，请放行所选管理端口的 TCP。
+仅在启用公网 HTTPS 管理时，才需要在云防火墙放行管理端口 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
 如尚未设置账号，在服务器运行：sudo panelctl admin
 
 查看访问地址：sudo panelctl access show
-修改管理端口：sudo panelctl access public --port 54323
-改回 SSH 隧道模式：sudo panelctl access private
+修改管理端口（HTTPS 公网模式）：sudo panelctl access public --port 54323
+使用 SSH 隧道模式：sudo panelctl access private
 证书与自动续签：sudo panelctl cert panel.example.com
 自有小站、HTTPS 面板与 REALITY 预设：sudo panelctl site www.example.com --panel-https
 面板也使用 HTTPS：sudo panelctl cert panel.example.com --panel-https
 查看状态：sudo panelctl status
 MSG
 if [[ "$install_access" == private ]]; then
-  printf '%s\n' '当前保留私有模式，请先在自己的电脑建立 SSH 隧道：'
+  printf '%s\n' '当前使用私有模式，管理面板仅监听本机。请先在自己的电脑建立 SSH 隧道：'
   printf 'ssh -N -L %s:127.0.0.1:%s root@SERVER_IP\n' "$selected_port" "$selected_port"
 fi

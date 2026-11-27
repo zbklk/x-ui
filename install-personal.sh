@@ -10,7 +10,8 @@ export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 command -v apt-get >/dev/null || { echo '目前仅支持 Debian / Ubuntu'; exit 1; }
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl python3 python3-venv openssl
+echo '正在安装面板依赖。如系统正在更新，将等待 dpkg 锁释放，最多 10 分钟。'
+apt-get -o DPkg::Lock::Timeout=600 install -y ca-certificates curl python3 python3-venv openssl
 python3 -c 'import sys; assert sys.version_info >= (3, 10), "需要 Python 3.10+，建议 Ubuntu 22.04+ / Debian 12+"'
 
 work=$(mktemp -d)

@@ -3,13 +3,17 @@ import copy
 import json
 import os
 from pathlib import Path
+import secrets
+import socket
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import uuid
 
 from werkzeug.security import generate_password_hash
+import manage
 from app import create_app
 from core import Core, PanelError, clean_node, clean_state, share_link, xray_config
 
@@ -173,6 +177,71 @@ class APITests(unittest.TestCase):
         client = create_app(self.core, testing=True).test_client()
         self.assertEqual(client.post("/api/login", json={"username": "admin", "password": "a-secure-test-password"}).status_code, 429)
 
+    def test_interactive_admin_retries_and_keeps_the_username(self):
+        self.login()
+        with patch.object(manage.os, "geteuid", return_value=1000), patch.object(manage, "Core", return_value=self.core), \
+             patch("builtins.input", side_effect=["invalid name", ""]) as username, \
+             patch.object(manage.getpass, "getpass", side_effect=[
+                 "123456", "x" * 129, "1234567", "mismatch", "1234567", "1234567"
+             ]) as password:
+            manage.admin(SimpleNamespace(username=None))
+        self.assertEqual(username.call_count, 2)
+        self.assertEqual(password.call_count, 6)
+        self.assertEqual(self.client.get("/api/session").status_code, 401)
+        self.assertEqual(self.client.post("/api/login", json={"username": "admin", "password": "1234567"}).status_code, 200)
+
+    def test_account_change_validates_credentials_and_revokes_all_sessions(self):
+        old = "a-secure-test-password"
+        update = dict(username="owner", current_password=old, new_password="1234567", confirm_password="1234567")
+        self.assertEqual(self.post("/api/account", update).status_code, 401)
+        self.login()
+        other = self.app.test_client()
+        self.assertEqual(other.post("/api/login", json={"username": "admin", "password": old}).status_code, 200)
+        self.assertEqual(self.client.post("/api/account", json=update).status_code, 403)
+        for changes, status in [
+            (dict(current_password="wrong"), 403), (dict(username="bad name"), 400),
+            (dict(new_password="123456", confirm_password="123456"), 400),
+            (dict(new_password="x"*129, confirm_password="x"*129), 400),
+            (dict(confirm_password="different"), 400)
+        ]:
+            with self.subTest(changes=changes):
+                self.assertEqual(self.post("/api/account", dict(update, **changes)).status_code, status)
+        self.assertEqual(self.client.get("/api/session").json["username"], "admin")
+        self.assertEqual(self.post("/api/account", update).status_code, 200)
+        for client in (self.client, other):
+            self.assertEqual(client.get("/api/session").status_code, 401)
+        for username, password in [("admin", old), ("owner", old), ("admin", "1234567")]:
+            self.assertEqual(self.client.post("/api/login", json=dict(username=username, password=password)).status_code, 401)
+        self.assertEqual(self.client.post("/api/login", json={"username": "owner", "password": "1234567"}).status_code, 200)
+
+    def test_rename_only_and_password_only(self):
+        self.login()
+        old = "a-secure-test-password"
+        self.assertEqual(self.post("/api/account", dict(username="owner", current_password=old)).status_code, 200)
+        response = self.client.post("/api/login", json=dict(username="owner", password=old))
+        self.assertEqual(response.status_code, 200)
+        self.csrf = response.json["csrf"]
+        password = "x" * 128
+        self.assertEqual(self.post("/api/account", dict(username="owner", current_password=old,
+                              new_password=password, confirm_password=password)).status_code, 200)
+        self.assertEqual(self.client.post("/api/login", json=dict(username="owner", password=password)).status_code, 200)
+
+    def test_account_reauthentication_is_rate_limited(self):
+        self.login()
+        for _ in range(8):
+            self.assertEqual(self.post("/api/account", dict(username="owner", current_password="wrong")).status_code, 403)
+        self.assertEqual(self.post("/api/account", dict(username="owner", current_password="a-secure-test-password")).status_code, 429)
+
+    def test_login_cannot_issue_session_after_concurrent_credential_change(self):
+        def finish_old_password_check(*args):
+            with self.core.db() as db:
+                db.execute("UPDATE admin SET password_hash=? WHERE id=1", ("changed",))
+            return True
+        with patch("app.check_password_hash", side_effect=finish_old_password_check):
+            response = self.client.post("/api/login", json={"username": "admin", "password": "a-secure-test-password"})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.client.get("/api/session").status_code, 401)
+
     def test_ip_allowlist_does_not_trust_forwarded_headers(self):
         app = create_app(self.core, testing=False)
         response = app.test_client().get("/", environ_base={"REMOTE_ADDR": "203.0.113.1"}, headers={"X-Forwarded-For": "127.0.0.1"})
@@ -197,6 +266,47 @@ class APITests(unittest.TestCase):
         self.assertEqual(len(self.core.state()["nodes"][0]["clients"]), 2)
         self.assertEqual(self.post(f"/api/usage/{cid}/reset").status_code, 200)
         self.assertEqual(self.post('/api/restart-core').status_code, 200)
+
+    def test_new_node_selects_and_persists_a_free_port(self):
+        self.login()
+        existing = dict(node(port=20000), enabled=False)
+        self.assertEqual(self.post("/api/nodes", existing).json["port"], 20000)
+        new = dict(node("shadowsocks2022"), listen="127.0.0.1")
+        del new["port"]
+        random_offset = secrets.randbelow
+        with socket.socket() as tcp, socket.socket(type=socket.SOCK_DGRAM) as udp, \
+             patch.dict(os.environ, PANEL_SITE_DOMAIN="test.example", PANEL_SITE_PORT="24443"):
+            tcp.bind(("127.0.0.1", 0))
+            tcp.listen()
+            udp.bind(("127.0.0.1", 0))
+            blocked = [20000, self.app.extensions["access"].port, self.core.stats_port, 24443,
+                       tcp.getsockname()[1], udp.getsockname()[1]]
+            candidates = iter(blocked)
+            def next_offset(limit):
+                candidate = next(candidates, None)
+                return candidate - 10000 if candidate is not None else random_offset(limit)
+            with patch("core.secrets.randbelow", side_effect=next_offset) as choose:
+                response = self.post("/api/nodes", new)
+            self.assertEqual(response.status_code, 200, response.json)
+            port = response.json["port"]
+            self.assertGreater(choose.call_count, len(blocked))
+            self.assertNotIn(port, blocked)
+            self.assertTrue(10000 <= port <= 65535)
+        saved = self.core.state()["nodes"][-1]
+        self.assertEqual((saved["id"], saved["port"]), (new["id"], port))
+        share = self.client.get(f'/api/share/{saved["id"]}/{saved["clients"][0]["id"]}').json["link"]
+        self.assertIn(f":{port}", share)
+        path = "/api/nodes/" + saved["id"]
+        self.assertEqual(self.post(path, dict(saved, name="renamed"), method="PUT").status_code, 200)
+        self.assertEqual(self.post(path, dict(saved, port=None), method="PUT").status_code, 400)
+        self.assertEqual(self.core.state()["nodes"][-1]["port"], port)
+        for blank in (None, ""):
+            another = self.post("/api/nodes", dict(node(), port=blank, listen="127.0.0.1"))
+            self.assertEqual(another.status_code, 200, another.json)
+        ports = [n["port"] for n in self.core.state()["nodes"]]
+        self.assertEqual(len(set(ports)), len(ports))
+        for invalid in (0, 65536, True, "20000", 20000, self.app.extensions["access"].port):
+            self.assertEqual(self.post("/api/nodes", dict(node(), port=invalid)).status_code, 400)
 
     def test_oversize_invalid_backup_and_no_file_disclosure(self):
         self.login()

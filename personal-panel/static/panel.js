@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 let csrf = '', snapshot = null, editing = null, refreshing = false;
 const names = {'vless-reality':'VLESS · REALITY · Vision','vless-ws-tls':'VLESS · WS · TLS','vmess-ws-tls':'VMess · WS · TLS','trojan-tls':'Trojan · TLS','shadowsocks2022':'Shadowsocks 2022','hysteria2':'Hysteria2 · QUIC · TLS'};
 const nodeForm = $('node-form');
+const accountForm = $('account-form');
 function el(tag, attrs={}, ...children) {
   const n=document.createElement(tag);
   for (const [k,v] of Object.entries(attrs)) {
@@ -23,7 +24,11 @@ async function api(path,method='GET',data) {
   if(!res.ok){if(res.status===401&&path!=='/api/login')showLogin();throw Error(out.error||'请求失败');}
   return out;
 }
-function showLogin() {csrf='';snapshot=null;$('workspace').hidden=true;$('login').hidden=false;}
+function showLogin() {
+  csrf='';snapshot=null;
+  for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+  $('workspace').hidden=true;$('login').hidden=false;
+}
 function showWorkspace(username){$('login').hidden=true;$('workspace').hidden=false;$('username').textContent=username;}
 function bytes(v){if(!v)return '0 B';const units=['B','KiB','MiB','GiB','TiB'];let i=0;while(v>=1024&&i<4){v/=1024;i++;}return `${v.toFixed(i?1:0)} ${units[i]}`;}
 function date(v){return v?new Date(v*1000).toLocaleString():'不限期';}
@@ -61,6 +66,46 @@ function render(){
 async function attempt(fn){try{await fn();}catch(e){toast(e.message);}}
 $('login-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;$('login-error').textContent='';try{const r=await api('/api/login','POST',{username:e.target.elements.username.value,password:e.target.elements.password.value});csrf=r.csrf;e.target.elements.password.value='';showWorkspace(r.username);await refresh();}catch(error){$('login-error').textContent=error.message;}finally{button.disabled=false;}});
 $('logout').onclick=()=>attempt(async()=>{await api('/api/logout','POST');showLogin();});
+$('open-account').onclick = () => {
+  accountForm.reset();
+  accountForm.elements.username.value = $('username').textContent;
+  $('account-error').textContent = '';
+  $('account-dialog').showModal();
+};
+$('account-dialog').addEventListener('close', () => accountForm.reset());
+accountForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const fields = accountForm.elements;
+  const username = fields.username.value.trim();
+  const error = $('account-error');
+  error.textContent = '';
+  if (fields.new_password.value !== fields.confirm_password.value) {
+    error.textContent = '两次新密码不一致';
+    fields.confirm_password.focus();
+    return;
+  }
+  if (username === $('username').textContent && !fields.new_password.value) {
+    error.textContent = '请修改用户名或输入新密码';
+    return;
+  }
+  const button = accountForm.querySelector('[type=submit]');
+  button.disabled = true;
+  try {
+    await api('/api/account', 'POST', {
+      username, current_password: fields.current_password.value,
+      new_password: fields.new_password.value, confirm_password: fields.confirm_password.value
+    });
+    showLogin();
+    $('login-form').elements.username.value = username;
+    $('login-error').textContent = '';
+    $('login-form').elements.password.focus();
+    toast('账户已更新，请重新登录');
+  } catch (failure) {
+    error.textContent = failure.message;
+  } finally {
+    button.disabled = false;
+  }
+});
 $('refresh').onclick=()=>attempt(refresh);
 for(const button of document.querySelectorAll('[data-tab]'))button.onclick=()=>{for(const b of document.querySelectorAll('[data-tab]'))b.classList.toggle('active',b===button);for(const s of document.querySelectorAll('.tab'))s.hidden=s.id!==button.dataset.tab;$('page-title').textContent=button.textContent.replace(/0[123]/,'').trim();};
 for(const button of document.querySelectorAll('[data-close]'))button.onclick=()=>$(button.dataset.close).close();
@@ -80,7 +125,9 @@ function protocolFields(){const p=nodeForm.elements.protocol.value;const visible
 }
 async function openNode(n=null){
  editing=n?n.id:null;nodeForm.reset();$('node-error').textContent='';$('node-title').textContent=n?'编辑入站与用户':'新建入站';$('client-editor').replaceChildren();
- if(n){for(const [k,v] of Object.entries(n)){const input=nodeForm.elements[k];if(input){if(input.type==='checkbox')input.checked=v;else input.value=v;}}n.clients.forEach(addClient);}else{nodeForm.elements.name.value='我的节点';nodeForm.elements.port.value=20000;nodeForm.elements.server_key.value=randKey();const site=snapshot?.status.site;if(site){nodeForm.elements.sni.value=site.domain;nodeForm.elements.dest.value=site.domain;nodeForm.elements.dest_port.value=site.port;if(!snapshot.state.settings.public_address)nodeForm.elements.address.value=site.domain;}addClient(newClient());}
+ nodeForm.elements.port.required=Boolean(n);
+ nodeForm.elements.port.placeholder=n?'请输入端口':'留空随机分配';
+ if(n){for(const [k,v] of Object.entries(n)){const input=nodeForm.elements[k];if(input){if(input.type==='checkbox')input.checked=v;else input.value=v;}}n.clients.forEach(addClient);}else{nodeForm.elements.name.value='我的节点';nodeForm.elements.server_key.value=randKey();const site=snapshot?.status.site;if(site){nodeForm.elements.sni.value=site.domain;nodeForm.elements.dest.value=site.domain;nodeForm.elements.dest_port.value=site.port;if(!snapshot.state.settings.public_address)nodeForm.elements.address.value=site.domain;}addClient(newClient());}
  protocolFields();$('node-dialog').showModal();
  if(!n)try{const keys=await api('/api/keypair','POST');for(const [k,v] of Object.entries(keys))nodeForm.elements[k].value=v;}catch(e){$('node-error').textContent=e.message;}
 }
@@ -89,9 +136,12 @@ nodeForm.elements.protocol.onchange=()=>{protocolFields();if(!editing){$('client
 $('add-client').onclick=()=>addClient(newClient());
 $('generate-keys').onclick=()=>attempt(async()=>{if(editing&&!confirm('更换密钥后，所有已有 REALITY 分享链接需要重新导入。继续？'))return;const keys=await api('/api/keypair','POST');for(const [k,v] of Object.entries(keys))nodeForm.elements[k].value=v;});
 nodeForm.addEventListener('submit',async e=>{e.preventDefault();$('node-error').textContent='';const button=e.target.querySelector('[type=submit]');button.disabled=true;try{
- const n={};for(const k of ['name','protocol','listen','address','sni','dest','private_key','public_key','short_id','path','server_key'])n[k]=nodeForm.elements[k].value.trim();n.obfs_password=nodeForm.elements.obfs_password.value;for(const k of ['port','dest_port'])n[k]=Number(nodeForm.elements[k].value);n.enabled=nodeForm.elements.enabled.checked;
+ const n={};for(const k of ['name','protocol','listen','address','sni','dest','private_key','public_key','short_id','path','server_key'])n[k]=nodeForm.elements[k].value.trim();n.obfs_password=nodeForm.elements.obfs_password.value;
+ if(nodeForm.elements.port.value!=='') n.port=nodeForm.elements.port.valueAsNumber;
+ n.dest_port=Number(nodeForm.elements.dest_port.value);n.enabled=nodeForm.elements.enabled.checked;
  n.clients=Array.from($('client-editor').children,row=>{const f=k=>row.querySelector(`[data-field="${k}"]`);return{id:row.dataset.id,name:f('name').value,secret:f('secret').value,enabled:f('enabled').checked,expires_at:f('expires_at').value?Math.floor(new Date(f('expires_at').value).getTime()/1000):0,quota_bytes:Math.round(Number(f('quota_gb').value)*1073741824)};});
- await api(editing?`/api/nodes/${editing}`:'/api/nodes',editing?'PUT':'POST',n);$('node-dialog').close();toast('配置校验通过，已提交到独立代理服务');await refresh();
+ const result=await api(editing?`/api/nodes/${editing}`:'/api/nodes',editing?'PUT':'POST',n);
+ $('node-dialog').close();toast(editing?'入站配置已保存':`入站已创建，端口 ${result.port}`);await refresh();
  }catch(error){$('node-error').textContent=error.message;}finally{button.disabled=false;}});
 $('settings-form').addEventListener('submit',e=>{e.preventDefault();attempt(async()=>{const f=e.target.elements;await api('/api/settings','POST',{public_address:f.public_address.value.trim(),ipv4_only:f.ipv4_only.checked,block_private:f.block_private.checked,loglevel:f.loglevel.value});toast('设置已保存');await refresh();});});
 async function openShare(n,c){const r=await api(`/api/share/${n}/${c}`);$('share-text').value=r.link;$('share-qr').src=`/api/qr/${n}/${c}`;$('share-dialog').showModal();}

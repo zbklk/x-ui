@@ -104,7 +104,37 @@ def b64key(value, size=32):
     return value
 
 
-def clean_node(data):
+def node_socket_types(protocol):
+    if protocol == "hysteria2":
+        return (socket.SOCK_DGRAM,)
+    if protocol == "shadowsocks2022":
+        return (socket.SOCK_STREAM, socket.SOCK_DGRAM)
+    return (socket.SOCK_STREAM,)
+
+
+def probe_port(listen, port, kind):
+    family = socket.AF_INET6 if ":" in listen else socket.AF_INET
+    with socket.socket(family, kind) as check:
+        check.bind((listen, port))
+
+
+def random_node_port(listen, protocol, reserved):
+    for _ in range(128):
+        port = 10000 + secrets.randbelow(65536 - 10000)
+        if port in reserved:
+            continue
+        try:
+            for kind in node_socket_types(protocol):
+                probe_port(listen, port, kind)
+        except OSError as error:
+            if error.errno in (errno.EADDRINUSE, errno.EACCES, errno.EPERM):
+                continue
+            raise PanelError("无法在此监听 IP 上分配端口，请检查监听地址") from None
+        return port
+    raise PanelError("未找到可用的随机端口，请重试或手动填写端口")
+
+
+def clean_node(data, *, reserved_ports=None):
     if not isinstance(data, dict):
         raise PanelError("入站格式不正确")
     protocol = data.get("protocol")
@@ -114,10 +144,16 @@ def clean_node(data):
         listen = str(ipaddress.ip_address(data.get("listen", "::")))
     except ValueError:
         raise PanelError("监听地址必须是 IP") from None
+    port = data.get("port")
+    if reserved_ports is not None and port in (None, ""):
+        port = random_node_port(listen, protocol, reserved_ports)
+    port = integer(port, "端口", 1, 65535)
+    if reserved_ports is not None and port in reserved_ports:
+        raise PanelError("端口已用于其他入站、面板管理、统计服务或自有小站")
     n = {"id": uid(data.get("id", str(uuid.uuid4()))),
          "name": text(data.get("name", "新入站"), "名称", 80),
          "protocol": protocol, "listen": listen,
-         "port": integer(data.get("port"), "端口", 1, 65535),
+         "port": port,
          "enabled": boolean(data.get("enabled", True), "启用状态"),
          "address": host(data.get("address", ""), empty=True)}
     if protocol == "vless-reality":
@@ -454,21 +490,16 @@ class Core:
     def check_new_ports(self, current, state, usage):
         def live(n):
             return n["enabled"] and any(active_client(c, usage, time.time()) for c in n["clients"])
-        old_tcp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n) and n["protocol"] != "hysteria2"}
-        old_udp = {(n["listen"], n["port"]) for n in current["nodes"] if live(n) and n["protocol"] in ("shadowsocks2022", "hysteria2")}
+        previous = {(n["listen"], n["port"], kind) for n in current["nodes"] if live(n)
+                    for kind in node_socket_types(n["protocol"])}
         for n in state["nodes"]:
             if not live(n):
                 continue
-            for kind, old in ((socket.SOCK_STREAM, old_tcp), (socket.SOCK_DGRAM, old_udp)):
-                if kind == socket.SOCK_DGRAM and n["protocol"] not in ("shadowsocks2022", "hysteria2"):
-                    continue
-                if kind == socket.SOCK_STREAM and n["protocol"] == "hysteria2":
-                    continue
-                if (n["listen"], n["port"]) in old:
+            for kind in node_socket_types(n["protocol"]):
+                if (n["listen"], n["port"], kind) in previous:
                     continue
                 try:
-                    with socket.socket(socket.AF_INET6 if ":" in n["listen"] else socket.AF_INET, kind) as check:
-                        check.bind((n["listen"], n["port"]))
+                    probe_port(n["listen"], n["port"], kind)
                 except OSError as error:
                     if n["port"] < 1024 and error.errno in (errno.EACCES, errno.EPERM):
                         # Only the separate proxy core has CAP_NET_BIND_SERVICE.

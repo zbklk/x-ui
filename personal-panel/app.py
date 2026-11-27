@@ -17,7 +17,8 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash
 
 from access import AccessPolicy
-from core import Core, PanelError, atomic_write, clean_node, share_link, uid
+from accounts import save_admin, validate_password, validate_username
+from core import Core, PanelError, atomic_write, clean_node, owned_site, share_link, uid
 
 COOKIE = "personal_panel_session"
 
@@ -99,6 +100,25 @@ def create_app(core=None, testing=False):
     def health():
         return jsonify(ok=True)
 
+    def verify_admin(password, username=None):
+        now, ip = time.time(), request.remote_addr or "unknown"
+        with core.db() as db:
+            db.execute("DELETE FROM attempts WHERE at < ?", (now - 900,))
+            count = db.execute("SELECT count(*) FROM attempts WHERE ip=?", (ip,)).fetchone()[0]
+            if count >= 8:
+                response = jsonify(error="密码验证次数过多，请 15 分钟后重试")
+                response.headers["Retry-After"] = "900"
+                return None, (response, 429)
+            admin = db.execute("SELECT username,password_hash FROM admin WHERE id=1").fetchone()
+            # Count attempts before checking the expensive password hash.
+            db.execute("INSERT INTO attempts VALUES(?,?)", (ip, now))
+        if admin and check_password_hash(admin["password_hash"], password):
+            if username is None or hmac.compare_digest(admin["username"].encode(), username.encode()):
+                return admin, None
+        if username is None:
+            return None, (jsonify(error="当前密码不正确"), 403)
+        return None, (jsonify(error="用户名或密码不正确"), 401)
+
     @app.post("/api/login")
     def login():
         body = request.get_json()
@@ -107,24 +127,17 @@ def create_app(core=None, testing=False):
         username, password = body.get("username", ""), body.get("password", "")
         if not isinstance(username, str) or not isinstance(password, str) or len(username) > 80 or len(password) > 128:
             raise PanelError("登录格式不正确")
-        now, ip = time.time(), request.remote_addr or "unknown"
-        with core.db() as db:
-            db.execute("DELETE FROM attempts WHERE at < ?", (now - 900,))
-            count = db.execute("SELECT count(*) FROM attempts WHERE ip=?", (ip,)).fetchone()[0]
-            if count >= 8:
-                response = jsonify(error="登录失败次数过多，请 15 分钟后重试")
-                response.headers["Retry-After"] = "900"
-                return response, 429
-            admin = db.execute("SELECT username,password_hash FROM admin WHERE id=1").fetchone()
-            # Count attempts before checking the expensive password hash.
-            db.execute("INSERT INTO attempts VALUES(?,?)", (ip, now))
-        valid = admin and check_password_hash(admin["password_hash"], password) and hmac.compare_digest(admin["username"].encode(), username.encode())
-        if not valid:
-            return jsonify(error="用户名或密码不正确"), 401
+        admin, error = verify_admin(password, username)
+        if error:
+            return error
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         with core.db() as db:
-            db.execute("DELETE FROM attempts WHERE ip=?", (ip,))
-            db.execute("INSERT INTO sessions VALUES(?,?,?)", (digest(token), csrf, now + 12 * 3600))
+            # An old password verified just before rotation must not open a new session.
+            saved = db.execute("INSERT INTO sessions SELECT ?,?,? FROM admin WHERE id=1 AND password_hash=?",
+                               (digest(token), csrf, time.time() + 12 * 3600, admin["password_hash"]))
+            if not saved.rowcount:
+                return jsonify(error="账户已更改，请重新登录"), 401
+            db.execute("DELETE FROM attempts WHERE ip=?", (request.remote_addr or "unknown",))
         response = jsonify(ok=True, csrf=csrf, username=admin["username"])
         response.set_cookie(COOKIE, token, max_age=12 * 3600, httponly=True, secure=secure, samesite="Strict", path="/")
         core.audit("管理员登录")
@@ -136,13 +149,41 @@ def create_app(core=None, testing=False):
             row = db.execute("SELECT username FROM admin WHERE id=1").fetchone()
         return jsonify(csrf=g.csrf, username=row[0])
 
+    def signed_out():
+        response = jsonify(ok=True)
+        response.delete_cookie(COOKIE, path="/", secure=secure, httponly=True, samesite="Strict")
+        return response
+
     @app.post("/api/logout")
     def logout():
         with core.db() as db:
             db.execute("DELETE FROM sessions WHERE token_hash=?", (digest(request.cookies.get(COOKIE, "")),))
-        response = jsonify(ok=True)
-        response.delete_cookie(COOKIE, path="/", secure=secure, httponly=True, samesite="Strict")
-        return response
+        return signed_out()
+
+    @app.post("/api/account")
+    def change_account():
+        body = request.get_json()
+        if not isinstance(body, dict):
+            raise PanelError("账户设置格式不正确")
+        username = body.get("username")
+        validate_username(username)
+        current = body.get("current_password")
+        if not isinstance(current, str) or not 1 <= len(current) <= 128:
+            raise PanelError("请输入当前密码")
+        password = body.get("new_password", "")
+        if password != "":
+            validate_password(password)
+        if password != body.get("confirm_password", ""):
+            raise PanelError("两次新密码不一致")
+        admin, error = verify_admin(current)
+        if error:
+            return error
+        if not password and username == admin["username"]:
+            raise PanelError("请修改用户名或输入新密码")
+        with core.db() as db:
+            save_admin(db, username, password or current, previous_hash=admin["password_hash"])
+        core.audit("管理员修改账户")
+        return signed_out()
 
     @app.get("/api/state")
     def state():
@@ -151,12 +192,17 @@ def create_app(core=None, testing=False):
     @app.post("/api/nodes")
     def add_node():
         body = request.get_json()
-        node = clean_node(body)
         def transform(s):
-            s["nodes"].append(node)
+            reserved = {policy.port, core.stats_port}
+            site = owned_site()
+            if site:
+                reserved.add(site["port"])
+            reserved.update(n["port"] for n in s["nodes"])
+            s["nodes"].append(clean_node(body, reserved_ports=reserved))
             return s
-        core.apply(transform, "新增入站")
-        return jsonify(ok=True, id=node["id"])
+        state = core.apply(transform, "新增入站")
+        node = state["nodes"][-1]
+        return jsonify(ok=True, id=node["id"], port=node["port"])
 
     @app.put("/api/nodes/<node_id>")
     def update_node(node_id):

@@ -24,7 +24,7 @@ from urllib.request import build_opener, ProxyHandler, HTTPSHandler
 from urllib.parse import urlsplit
 import zipfile
 
-from werkzeug.security import generate_password_hash
+from accounts import save_admin, validate_password, validate_username
 from core import Core, PanelError, atomic_write, host
 from access import AccessPolicy, DEFAULT_HOSTS, access_url, make_bind
 
@@ -353,19 +353,30 @@ def admin(args):
         os.initgroups(user.pw_name, user.pw_gid)
         os.setgid(user.pw_gid)
         os.setuid(user.pw_uid)
-    username = args.username or input("管理员用户名 [admin]：").strip() or "admin"
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", username):
-        raise PanelError("用户名仅支持 1–80 位英文字母、数字、点、下划线和短横线")
-    password = getpass.getpass("设置密码（至少 14 字符，输入不显示）：")
-    if not 14 <= len(password) <= 128:
-        raise PanelError("密码需要 14–128 字符")
-    if getpass.getpass("再次输入密码：") != password:
-        raise PanelError("两次密码不一致")
+    if args.username is not None:
+        username = args.username
+        validate_username(username)
+    else:
+        while True:
+            username = input("管理员用户名 [admin]：").strip() or "admin"
+            try:
+                validate_username(username)
+                break
+            except PanelError as error:
+                print(error, file=sys.stderr)
+    while True:
+        password = getpass.getpass("设置密码（7–128 个字符，输入不显示）：")
+        try:
+            validate_password(password)
+        except PanelError as error:
+            print(error, file=sys.stderr)
+            continue
+        if getpass.getpass("再次输入密码：") == password:
+            break
+        print("两次密码不一致，请重新设置密码。", file=sys.stderr)
     core = Core()
     with core.db() as db:
-        db.execute("INSERT OR REPLACE INTO admin VALUES(1,?,?)", (username, generate_password_hash(password, method="scrypt:32768:8:1")))
-        db.execute("DELETE FROM sessions")
-        db.execute("DELETE FROM attempts")
+        save_admin(db, username, password)
     core.audit("本机重设管理员；所有会话失效")
     print("管理员已保存：", username)
 

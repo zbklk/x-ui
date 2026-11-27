@@ -16,7 +16,7 @@
 bash <(curl -fsSL --proto '=https' --proto-redir '=https' https://raw.githubusercontent.com/zbklk/x-ui/main/install-personal.sh)
 ```
 
-普通用户先执行 `sudo -i`。安装时可设置管理端口，直接回车使用默认 **54322**；首次安装还会提示创建管理员账号与密码，密码至少 14 字符、输入不回显。
+普通用户先执行 `sudo -i`。管理端口回车使用默认 **54322**。首次安装时，用户名回车使用 `admin`，密码接受 **7–128 个字符**，输入不回显。长度不符或两次密码不一致时，按提示重新输入密码即可。
 
 安装后半段可输入已解析到 VPS 的域名，自动创建简单 HTTPS 网站、申请证书、启用自动续签，并让面板共用证书，输出 **HTTPS 域名 + 管理端口** 登录地址。登录后新建 REALITY 会预填 SNI、目标域名和目标端口。没有域名可直接回车跳过，之后随时运行 `panelctl site 你的域名 --panel-https`。
 
@@ -27,6 +27,8 @@ ssh -N -L 54322:127.0.0.1:54322 root@SERVER_IP
 ```
 
 然后在浏览器访问 `http://127.0.0.1:54322/`；若已启用 HTTPS，按证书覆盖的域名访问。使用安装时创建的账号登录。无人值守安装不会创建默认账号，可在 VPS 运行 `sudo panelctl admin`。
+
+登录后，点右上角 **账户设置**，输入当前密码即可修改用户名、密码或两者。仅改用户名时，新密码和确认框留空。保存后所有设备需重新登录。忘记密码时可通过 SSH 在 VPS 上运行 `sudo panelctl admin` 重设。
 
 公网管理必须启用 HTTPS；`panelctl access public` 在没有证书时会拒绝执行。SSH 隧道模式允许本机 HTTP，因为流量通过 SSH 加密。已配置的 HTTPS 在升级时保留。
 
@@ -118,7 +120,9 @@ sudo panelctl site www.example.com --port 8443 --panel-https
 | SNI 域名 | `www.example.com` | `www.example.com` |
 | REALITY 目标域名 | `www.example.com` | `www.example.com` |
 | 目标端口 | `443` | `8443` |
-| 入站端口 | 另选，例如 `20000` | 另选，例如 `20000` |
+| 入站端口 | 手填或留空随机分配 | 手填或留空随机分配 |
+
+新建入站时，端口可手填 **1–65535**。留空时，服务器在 **10000–65535** 中选择可绑定的端口，并避开已有入站、面板管理、统计和自有小站端口。保存后可在节点列表查看实际端口，并按所选协议在防火墙放行。编辑已有入站时会显示原端口。
 
 网站地址分别为 `https://www.example.com/` 或 `https://www.example.com:8443/`。域名字段不填写协议、路径或端口。**安装器会自动让管理面板共用证书**，面板地址为 `https://www.example.com:管理端口/`，例如 `https://www.example.com:54322/`；用安装时设置的管理员账号登录后即可创建节点。管理端口、节点、账号与来源限制保留；续签后网站及面板自动加载证书。原来的 `http://IP:管理端口/` 需改用 HTTPS 域名地址，HTTP 与 HTTPS 不在该端口并行提供。
 

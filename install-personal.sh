@@ -122,7 +122,7 @@ for old in sorted(folder.glob('before-install-*.sqlite3'))[:-7]:
     old.unlink()
 PY
 fi
-for file in app.py core.py singbox.py stats_rpc.py core_deploy.py access.py ownsite.py site_server.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json singbox-source.json; do
+for file in app.py core.py singbox.py stats_rpc.py core_deploy.py access.py accounts.py ownsite.py site_server.py manage.py wsgi.py gunicorn.conf.py requirements.txt upstream.json singbox-source.json; do
   install -m 644 "$source_dir/$file" "/opt/personal-panel/$file"
 done
 for directory in templates static deploy site; do
@@ -202,7 +202,8 @@ cat <<'MSG'
 Personal Panel 0.5.0 已安装，代理核心为 sing-box（支持 Hysteria2 / QUIC）。填入域名且证书配置成功时，请使用上方输出的 HTTPS 域名 + 管理端口登录。
 仅在启用公网 HTTPS 管理时，才需要在云防火墙放行管理端口 TCP。
 旧 x-ui 未被修改；原有 Personal Panel 管理员、节点及数据已保留。
-如尚未设置账号，在服务器运行：sudo panelctl admin
+登录后可在右上角「账户设置」修改用户名或密码。
+首次创建账号或忘记密码时，在服务器运行 sudo panelctl admin
 
 查看访问地址：sudo panelctl access show
 修改管理端口（HTTPS 公网模式）：sudo panelctl access public --port 54323

@@ -31,7 +31,7 @@
   </aside>
   <main class="content">
     <header><div><p class="eyebrow">YOUR PRIVATE NETWORK</p><h1 id="page-title">概览与节点</h1></div>
-      <div class="header-actions"><span id="username" class="muted"></span><button id="refresh">刷新</button><button id="logout">退出</button></div>
+      <div class="header-actions"><span id="username" class="muted"></span><button id="open-account">账户设置</button><button id="refresh">刷新</button><button id="logout">退出</button></div>
     </header>
     <section id="overview" class="tab">
       <div class="metrics">
@@ -77,6 +77,17 @@ sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测�
     <footer><span>Personal Panel</span><span>个人自用 · 独立代理核心 · 无外部前端 CDN</span></footer>
   </main>
 </div>
+<dialog id="account-dialog" class="narrow" aria-labelledby="account-title">
+  <form id="account-form">
+    <div class="dialog-head"><h2 id="account-title">账户设置</h2><button type="button" class="close" data-close="account-dialog" aria-label="关闭">×</button></div>
+    <label>用户名<input name="username" autocomplete="username" required maxlength="80"></label>
+    <label>当前密码<input name="current_password" type="password" autocomplete="current-password" required maxlength="128"></label>
+    <label>新密码<input name="new_password" type="password" autocomplete="new-password" minlength="7" maxlength="128" placeholder="7–128 个字符，仅改用户名时留空"></label>
+    <label>确认新密码<input name="confirm_password" type="password" autocomplete="new-password" maxlength="128"></label>
+    <p class="fine">保存后，所有已登录设备都需要重新登录。</p>
+    <div class="dialog-actions"><span id="account-error" class="error" role="alert"></span><button type="button" data-close="account-dialog">取消</button><button type="submit" class="primary">保存并重新登录</button></div>
+  </form>
+</dialog>
 <dialog id="node-dialog">
   <form id="node-form">
     <div class="dialog-head"><div><p class="eyebrow">INBOUND</p><h2 id="node-title">新建入站</h2></div><button type="button" class="close" data-close="node-dialog" aria-label="关闭">×</button></div>
@@ -84,7 +95,7 @@ sudo panelctl core rollback</pre><p class="fine">下载校验 SHA-256，先测�
       <label>名称<input name="name" required maxlength="80"></label>
       <label>协议<select name="protocol"><option value="vless-reality">VLESS · REALITY · Vision</option><option value="vless-ws-tls">VLESS · WebSocket · TLS</option><option value="vmess-ws-tls">VMess · WebSocket · TLS</option><option value="trojan-tls">Trojan · TCP · TLS</option><option value="shadowsocks2022">Shadowsocks 2022 · AES-128-GCM</option><option value="hysteria2">Hysteria2 · QUIC · TLS</option></select></label>
       <label>监听 IP<input name="listen" required value="::"></label>
-      <label>端口<input name="port" type="number" required min="1" max="65535" value="20000"></label>
+      <label>入站端口<input name="port" type="number" min="1" max="65535" placeholder="留空随机分配"></label>
       <label>分享地址（可选）<input name="address" placeholder="留空使用全局设置" maxlength="253"></label>
       <label class="check"><input name="enabled" type="checkbox" checked> 启用此入站</label>
       <label data-protocol="tls reality">SNI 域名<input name="sni" placeholder="你选择的域名"></label>
